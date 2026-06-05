@@ -1,0 +1,1153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>LEGION RUSH — Neon Crowd Runner · Play Free</title>
+<meta name="description" content="LEGION RUSH — steer a neon legion down a synthwave track, hit ×/＋ gates to multiply your crowd, dodge culling hazards, then slam the barrier. A crowd-multiplier runner. Play free in your browser." />
+<!-- Open Graph / social -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="LEGION RUSH" />
+<meta property="og:title" content="LEGION RUSH — Neon Crowd Runner" />
+<meta property="og:description" content="Steer a neon legion through multiply gates, dodge culling hazards, and slam the end-of-stage barrier. Synthwave crowd-runner. Play free." />
+<meta property="og:url" content="https://quangle1997.github.io/legion-rush/" />
+<meta property="og:image" content="https://quangle1997.github.io/legion-rush/assets/og-card.jpg" />
+<meta property="og:image:width" content="1200" /><meta property="og:image:height" content="675" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="LEGION RUSH — Neon Crowd Runner" />
+<meta name="twitter:description" content="Multiply your neon crowd, dodge hazards, slam the barrier. Play free." />
+<meta name="twitter:image" content="https://quangle1997.github.io/legion-rush/assets/og-card.jpg" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='88'>🏃</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+<!-- Three.js (zero-build via importmap CDN) -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+}}
+</script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+:root{
+  --bg:#06060d; --ink:#eef0ff; --mut:#9aa0c0; --line:rgba(255,255,255,.10);
+  --disp:'Orbitron',system-ui,sans-serif; --body:'Space Grotesk',system-ui,-apple-system,sans-serif;
+  --accent:#ff3344;            /* LEGION RUSH — hot scarlet */
+}
+html,body{height:100%;}
+body{ background:var(--bg); color:var(--ink); font-family:var(--body); line-height:1.45;
+  -webkit-font-smoothing:antialiased; display:grid; place-items:center; overflow:hidden;
+  user-select:none; -webkit-user-select:none; touch-action:none; }
+body::before{ content:""; position:fixed; inset:-30%; z-index:-2; pointer-events:none;
+  background:
+    radial-gradient(40% 40% at 18% 22%, color-mix(in srgb,var(--accent) 20%,transparent), transparent 60%),
+    radial-gradient(38% 38% at 82% 18%, rgba(127,180,255,.12), transparent 60%),
+    radial-gradient(45% 45% at 76% 84%, rgba(255,90,138,.12), transparent 60%),
+    radial-gradient(42% 42% at 22% 82%, rgba(167,139,250,.12), transparent 60%);
+  filter:blur(20px); animation:mesh 26s ease-in-out infinite alternate; }
+@keyframes mesh{ from{transform:translate3d(-3%,-2%,0) scale(1)} to{transform:translate3d(3%,3%,0) scale(1.08)} }
+@media (prefers-reduced-motion:reduce){ *{animation:none!important;} }
+
+/* MOBILE-FRAME (strategy A): portrait frame centered, letterbox on desktop */
+#app{ position:relative; width:min(100vw,480px); height:100dvh; max-height:100dvh;
+  overflow:hidden; background:linear-gradient(180deg,#0b0d16,#070810);
+  box-shadow:0 0 0 1px var(--line), 0 30px 80px -20px color-mix(in srgb,var(--accent) 40%,transparent); }
+canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+
+/* HUD */
+#hud{ position:absolute; inset:0; pointer-events:none; z-index:4; }
+#app.overlay-open #hud{ opacity:0; pointer-events:none; }   /* instant hide — never bleed through an overlay */
+.chip{ border:1px solid var(--line); background:linear-gradient(180deg,rgba(22,24,38,.74),rgba(12,13,22,.84));
+  backdrop-filter:blur(12px); border-radius:13px; padding:7px 11px; font-family:var(--disp); font-weight:800; }
+#top{ position:absolute; top:calc(env(safe-area-inset-top) + 10px); left:10px; right:10px;
+  display:flex; gap:8px; align-items:flex-start; justify-content:space-between; }
+#stageChip{ font-size:13px; letter-spacing:.06em; line-height:1.1; }
+#stageChip small{ display:block; font-family:var(--body); font-weight:600; font-size:9px; color:var(--mut); letter-spacing:.16em; margin-top:2px; }
+.icons{ display:flex; gap:8px; pointer-events:auto; }
+.icons button{ all:unset; box-sizing:border-box; cursor:pointer; width:38px; height:38px; display:grid; place-items:center;
+  border:1px solid var(--line); border-radius:11px; background:rgba(20,22,34,.7); backdrop-filter:blur(12px); font-size:17px; }
+/* big crowd counter */
+#crowdWrap{ position:absolute; top:calc(env(safe-area-inset-top) + 58px); left:0; right:0; text-align:center; }
+#crowd{ font-family:var(--disp); font-weight:900; font-size:clamp(46px,17vw,76px); line-height:.9;
+  letter-spacing:.01em; color:#fff; text-shadow:0 0 22px color-mix(in srgb,var(--accent) 80%,transparent), 0 4px 14px rgba(0,0,0,.6); }
+#crowd.pop{ animation:pop .26s cubic-bezier(.2,1.4,.4,1); }
+@keyframes pop{ 0%{transform:scale(1)} 40%{transform:scale(1.22)} 100%{transform:scale(1)} }
+#crowdLbl{ font-family:var(--disp); font-weight:700; font-size:10px; letter-spacing:.42em; color:var(--mut); margin-top:1px; padding-left:.42em;}
+/* score + streak row */
+#midrow{ position:absolute; top:calc(env(safe-area-inset-top) + 10px); left:50%; transform:translateX(-50%); display:flex; gap:8px; }
+#scoreChip{ font-size:13px; } #scoreChip small{ display:block; font-family:var(--body); font-weight:600; font-size:8px; color:var(--mut); letter-spacing:.2em; }
+#streakChip{ font-size:13px; color:#ffd24a; display:none; } #streakChip.on{ display:block; }
+/* bottom: target + progress */
+#bottom{ position:absolute; left:14px; right:14px; bottom:calc(env(safe-area-inset-bottom) + 14px); }
+#targetLine{ display:flex; justify-content:space-between; align-items:flex-end; font-family:var(--disp); font-weight:800; font-size:12px; letter-spacing:.08em; margin-bottom:6px; }
+#targetLine b{ color:var(--accent); font-size:15px; }
+#targetLine span{ color:var(--mut); font-weight:700; }
+#prog{ height:7px; border-radius:6px; background:rgba(255,255,255,.08); overflow:hidden; border:1px solid var(--line); }
+#progFill{ height:100%; width:0%; border-radius:6px; background:linear-gradient(90deg,var(--accent),#ffd24a); transition:width .12s linear; box-shadow:0 0 12px color-mix(in srgb,var(--accent) 70%,transparent); }
+/* center banner (stage intro / cleared) */
+#banner{ position:absolute; left:0; right:0; top:42%; text-align:center; pointer-events:none; opacity:0; transform:translateY(8px); }
+#banner.show{ animation:bnr 1.7s ease both; }
+@keyframes bnr{ 0%{opacity:0;transform:translateY(14px) scale(.96)} 14%{opacity:1;transform:translateY(0) scale(1)} 80%{opacity:1} 100%{opacity:0;transform:translateY(-10px)} }
+#banner .bt{ font-family:var(--disp); font-weight:900; text-transform:uppercase; letter-spacing:.06em; font-size:clamp(26px,8.5vw,40px);
+  background:linear-gradient(95deg,#ffd24a,var(--accent),#a78bfa); -webkit-background-clip:text; background-clip:text; color:transparent; text-shadow:0 6px 30px rgba(0,0,0,.5); }
+#banner .bs{ font-family:var(--disp); font-weight:700; letter-spacing:.3em; font-size:12px; color:var(--mut); margin-top:4px; }
+/* steer hint */
+#hint{ position:absolute; left:0; right:0; bottom:calc(env(safe-area-inset-bottom) + 56px); text-align:center; font-family:var(--disp); font-weight:700; letter-spacing:.22em; font-size:11px; color:var(--mut); opacity:0; transition:opacity .3s; }
+#hint.on{ opacity:.9; animation:hpulse 1.6s ease-in-out infinite; }
+@keyframes hpulse{ 50%{opacity:.45} }
+/* white slam flash */
+#flash{ position:absolute; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:6; }
+
+/* OVERLAYS */
+.overlay{ position:absolute; inset:0; display:grid; place-items:center; padding:22px; z-index:10;
+  background:radial-gradient(120% 120% at 50% 0%, rgba(8,9,16,.55), rgba(6,6,13,.92)); }
+.overlay.hidden{ display:none; } .overlay.hidden *{ pointer-events:none; }
+.panel{ width:100%; max-width:360px; text-align:center; border:1px solid var(--line);
+  background:linear-gradient(180deg,rgba(22,24,38,.88),rgba(12,13,22,.94)); backdrop-filter:blur(14px);
+  border-radius:22px; padding:26px 22px; box-shadow:0 24px 60px -18px color-mix(in srgb,var(--accent) 48%,transparent); }
+h1{ font-family:var(--disp); font-weight:900; text-transform:uppercase; letter-spacing:.03em;
+  font-size:clamp(34px,11vw,52px); line-height:.95; margin-bottom:4px;
+  background:linear-gradient(95deg,#ffd24a,var(--accent),#a78bfa,#ff5a8a); -webkit-background-clip:text; background-clip:text; color:transparent; }
+.kick{ font-family:var(--disp); font-weight:700; text-transform:uppercase; letter-spacing:.28em; font-size:11px; color:var(--mut); margin-bottom:16px; }
+.btn{ all:unset; box-sizing:border-box; cursor:pointer; display:block; width:100%; margin:10px 0; padding:15px; text-align:center;
+  font-family:var(--disp); font-weight:800; text-transform:uppercase; letter-spacing:.12em; font-size:15px; border-radius:14px;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 92%,#fff 0%),color-mix(in srgb,var(--accent) 72%,#000 16%));
+  color:#1a0307; box-shadow:0 10px 26px -10px color-mix(in srgb,var(--accent) 75%,transparent); }
+.btn.ghost{ background:rgba(255,255,255,.05); color:var(--ink); border:1px solid var(--line); box-shadow:none; }
+.pills{ display:flex; gap:8px; justify-content:center; margin:14px 0 6px; }
+.pill{ flex:1 1 0; min-width:0; box-sizing:border-box; padding:11px 6px; border-radius:12px; border:1px solid var(--line); background:rgba(255,255,255,.04);
+  font-family:var(--disp); font-weight:700; font-size:12px; text-transform:uppercase; letter-spacing:.06em; cursor:pointer; color:var(--mut); }
+.pill.on{ color:#1a0307; background:var(--accent); border-color:transparent; }
+.stat{ display:flex; justify-content:space-between; padding:9px 2px; border-bottom:1px solid var(--line); font-size:14px; }
+.stat b{ font-family:var(--disp); color:var(--accent); }
+.how{ text-align:left; color:var(--mut); font-size:13.5px; line-height:1.55; margin:6px 0 4px; }
+.how p{ margin:7px 0; } .how b{ color:var(--ink); }
+.toggle{ display:flex; align-items:center; justify-content:space-between; padding:11px 2px; font-size:14px; }
+.sw{ width:46px; height:26px; border-radius:20px; background:rgba(255,255,255,.12); position:relative; cursor:pointer; transition:.15s; }
+.sw.on{ background:var(--accent); } .sw::after{ content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; transition:.15s; }
+.sw.on::after{ left:23px; }
+.tag{ display:inline-block; font-family:var(--disp); font-weight:700; font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--accent); border:1px solid color-mix(in srgb,var(--accent) 40%,transparent); border-radius:999px; padding:3px 9px; margin:3px 2px; }
+#simOut{ position:absolute; inset:0; background:#06060d; color:#9fe; font:12px/1.4 monospace; padding:14px; white-space:pre; overflow:auto; z-index:50; display:none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="cv"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="top">
+      <div class="chip" id="stageChip">STAGE 1/8<small id="stageName">NEON DAWN</small></div>
+      <div class="icons">
+        <button id="muteBtn" aria-label="Mute">🔊</button>
+        <button id="pauseBtn" aria-label="Pause">⏸</button>
+      </div>
+    </div>
+    <div id="midrow">
+      <div class="chip" id="scoreChip">0<small>SCORE</small></div>
+      <div class="chip" id="streakChip">🔥×1.0</div>
+    </div>
+    <div id="crowdWrap">
+      <div id="crowd">18</div>
+      <div id="crowdLbl">LEGION</div>
+    </div>
+    <div id="bottom">
+      <div id="targetLine"><span id="distLbl">CHARGE</span><div>TARGET <b id="tgtVal">80</b></div></div>
+      <div id="prog"><div id="progFill"></div></div>
+    </div>
+    <div id="hint" class="">◀ DRAG TO STEER ▶</div>
+    <div id="banner"><div class="bt" id="bTitle">STAGE 1</div><div class="bs" id="bSub">NEON DAWN</div></div>
+  </div>
+  <div id="flash"></div>
+
+  <!-- MENU -->
+  <div class="overlay" id="menu">
+    <div class="panel">
+      <h1>LEGION<br>RUSH</h1>
+      <div class="kick">Neon Crowd Runner · QUANG ARCADE</div>
+      <div class="pills" id="diffPills">
+        <div class="pill" data-diff="easy">Easy</div>
+        <div class="pill on" data-diff="normal">Normal</div>
+        <div class="pill" data-diff="hard">Hard</div>
+      </div>
+      <button class="btn" id="playBtn">▶ Play</button>
+      <button class="btn ghost" id="howBtn">How to play</button>
+      <div class="stat"><span>Best score</span><b id="bestVal">0</b></div>
+      <div class="stat"><span>Biggest legion</span><b id="bestCrowdVal">0</b></div>
+    </div>
+  </div>
+
+  <!-- HOW TO PLAY -->
+  <div class="overlay hidden" id="how">
+    <div class="panel">
+      <h1 style="font-size:30px">How to play</h1>
+      <div class="how">
+        <p>🏃 Your legion <b>auto-runs forward</b>. <b>Drag left/right</b> (or ◀ ▶ / A-D) to steer the whole crowd.</p>
+        <p>✳️ Run through <b>gates</b>: <b style="color:#7CFFA0">×2 / +30</b> grow your legion, <b style="color:#ff5a6a">−15</b> shrink it. Always grab the better gate.</p>
+        <p>☣️ Dodge spinning <b>hazards</b> — they cull a slice of your crowd.</p>
+        <p>💥 At each stage end, <b>CHARGE</b> the barrier. Crowd ≥ target = smash through &amp; score big. Below target = wiped.</p>
+        <p>🔥 Clear a stage with <b>zero losses</b> to build a streak score multiplier. 8 stages. Lose if your legion hits 0.</p>
+      </div>
+      <button class="btn" id="howOk">Got it</button>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div class="overlay hidden" id="pause">
+    <div class="panel">
+      <h1 style="font-size:34px">Paused</h1>
+      <div class="kick">Hold the line</div>
+      <div class="toggle"><span>Music</span><div class="sw on" id="swMusic"></div></div>
+      <div class="toggle"><span>Sound FX</span><div class="sw on" id="swSfx"></div></div>
+      <div class="toggle"><span>Haptics</span><div class="sw on" id="swHaptic"></div></div>
+      <button class="btn" id="resumeBtn">Resume</button>
+      <button class="btn ghost" id="quitBtn">Quit to menu</button>
+    </div>
+  </div>
+
+  <!-- GAME OVER / VICTORY -->
+  <div class="overlay hidden" id="gameover">
+    <div class="panel">
+      <div class="kick" id="goKick">Legion fallen</div>
+      <h1 id="finalScore">0</h1>
+      <div class="kick" style="margin:-6px 0 14px" id="goSubKick">SCORE</div>
+      <div class="stat"><span>Best score</span><b id="goBest">0</b></div>
+      <div class="stat"><span>Biggest legion</span><b id="goCrowd">0</b></div>
+      <div class="stat"><span>Stage reached</span><b id="goStage">1</b></div>
+      <button class="btn" id="retryBtn">▶ Play again</button>
+      <button class="btn ghost" id="menuBtn">Menu</button>
+    </div>
+  </div>
+
+  <pre id="simOut"></pre>
+</div>
+
+<script type="module">
+/* ============================================================
+   LEGION RUSH — 3D neon crowd-multiplier runner.
+   Single file, zero-build. Three.js via importmap CDN.
+   Shell (Save/Settings/Audio/Scenes/overlays) adapted from the
+   QUANG ARCADE starter; the 3D game is bespoke.
+   Balance numbers live in CONFIG + STAGES (DOCS.md §14/§5).
+   ============================================================ */
+
+/* ---------- CDN-fail guard: load Three.js, else show Reload ---------- */
+let THREE, USE_BLOOM = true, EffectComposer, RenderPass, UnrealBloomPass, OutputPass;
+try {
+  THREE = await import('three');
+  try {
+    ({ EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js'));
+    ({ RenderPass }     = await import('three/addons/postprocessing/RenderPass.js'));
+    ({ UnrealBloomPass }= await import('three/addons/postprocessing/UnrealBloomPass.js'));
+    ({ OutputPass }     = await import('three/addons/postprocessing/OutputPass.js'));
+  } catch(e){ USE_BLOOM = false; console.warn('bloom addons unavailable, running without bloom', e); }
+} catch (err) {
+  document.body.innerHTML =
+    '<div style="display:grid;place-items:center;height:100dvh;font-family:system-ui;color:#eef0ff;text-align:center;padding:24px">'
+    + '<div><h2>Couldn’t load the game engine</h2><p style="opacity:.7;margin:8px 0 14px">Check your connection and reload.</p>'
+    + '<button onclick="location.reload()" style="padding:12px 22px;border-radius:12px;border:0;background:#ff3344;color:#fff;font-weight:700;cursor:pointer">Reload</button></div></div>';
+  console.error(err);
+  throw err;
+}
+window.__errs=[];
+addEventListener('error', e => { window.__errs.push(''+(e.message||e.error)); console.error('runtime', e.error || e.message); });
+addEventListener('unhandledrejection', e => { window.__errs.push('promise:'+e.reason); console.error('promise', e.reason); });
+
+const NS = 'legion-rush';
+const DEBUG = new URLSearchParams(location.search).get('debug')==='1';
+const $ = s => document.querySelector(s);
+const clamp = (v,a,b)=> v<a?a : v>b?b : v;
+const lerp = (a,b,t)=> a+(b-a)*t;
+
+/* ============================================================
+   §14 CONFIG — single source of truth for balance numbers.
+   ============================================================ */
+const CONFIG = {
+  RENDER_CAP: 700,              // max instanced runners drawn (logic count can exceed)
+  MAX_LOGIC: 99999999,
+  START_MULT:  { easy:1.50, normal:1.0, hard:0.75 }, // scales each stage's start crowd
+  RUN_SPEED:   { easy:15, normal:18, hard:21 },     // world units / sec
+  CHARGE_MULT: 2.3,             // speed-up during the final charge
+  TRACK_HALF: 6.0,              // half track width; steer clamp = TRACK_HALF - STEER_MARGIN
+  STEER_MARGIN: 0.5,
+  STEER_SENS: 1.7,              // drag sensitivity (canvas-widths -> track-widths)
+  STEER_LERP: 9,                // how fast centroid chases target
+  KEY_SPEED: 11,                // desktop arrow steer speed (units/sec)
+  SPACING: 0.62,                // phyllotaxis packing -> crowd density
+  RUNNER_R: 0.30,
+  BOB_RATE: 9.0,                // run-cycle bob frequency
+  // difficulty global modifiers
+  HAZARD_MULT: { easy:0.70, normal:1.0, hard:1.15 },  // scales hazard cull fraction
+  TARGET_MULT: { easy:0.60, normal:1.0, hard:1.12 },  // scales every stage target
+  // streak + scoring (DOCS §7)
+  STREAK_STEP: 0.20,            // mult = 1 + min(streak,STREAK_MAX)*STREAK_STEP
+  STREAK_MAX: 10,
+  SCORE_SLAM: 4,               // points per runner present at the slam
+  SCORE_CLEAR: 250,            // flat per stage cleared
+  SCORE_SURPLUS: 2,            // points per surplus runner (crowd - target)
+};
+
+/* ============================================================
+   §5 STAGES — ordered events + end barrier target.
+   ev codes:  G = gate row (pick nearest lane), H = hazard, P = pickup
+   gate op: 'mul' | 'add' | 'sub'  ·  side: -1 left, 0 center, +1 right
+   haz cull = fraction of crowd removed on contact (scaled by HAZARD_MULT)
+   `target` is the base barrier strength (scaled by TARGET_MULT per difficulty).
+   ============================================================ */
+const STAGES = [
+  { name:'NEON DAWN', hue:330, len:120, start:20, target:130, ev:[
+    {at:22, t:'G', g:[{side:-1,op:'add',v:20},{side:1,op:'mul',v:2}]},
+    {at:44, t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'add',v:15}]},
+    {at:64, t:'H', kind:'saw', x:-2.6, w:3.0, cull:0.25},
+    {at:84, t:'G', g:[{side:-1,op:'add',v:30},{side:1,op:'mul',v:2}]},
+    {at:102,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'sub',v:25}]},
+  ]},
+  { name:'PULSE GRID', hue:280, len:135, start:26, target:320, ev:[
+    {at:22, t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'add',v:25}]},
+    {at:44, t:'G', g:[{side:-1,op:'add',v:40},{side:1,op:'mul',v:2}]},
+    {at:62, t:'H', kind:'spin', x:1.8, w:3.4, cull:0.30},
+    {at:82, t:'P', x:0, op:'add', v:60},
+    {at:100,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'sub',v:60}]},
+    {at:118,t:'G', g:[{side:-1,op:'sub',v:50},{side:1,op:'mul',v:2}]},
+  ]},
+  { name:'VOLT CANYON', hue:200, len:150, start:32, target:1150, ev:[
+    {at:22, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:40}]},
+    {at:42, t:'H', kind:'wall', x:-2.4, w:3.2, cull:0.35},
+    {at:62, t:'G', g:[{side:-1,op:'add',v:60},{side:1,op:'mul',v:2}]},
+    {at:82, t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'mul',v:3}]},
+    {at:102,t:'H', kind:'saw', x:2.2, w:3.4, cull:0.38},
+    {at:122,t:'G', g:[{side:-1,op:'sub',v:200},{side:1,op:'mul',v:2}]},
+    {at:138,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'add',v:80}]},
+  ]},
+  { name:'MAGMA RUN', hue:18, len:160, start:42, target:2300, ev:[
+    {at:22, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
+    {at:42, t:'G', g:[{side:-1,op:'add',v:80},{side:1,op:'mul',v:3}]},
+    {at:60, t:'H', kind:'spin', x:-2.0, w:3.6, cull:0.42},
+    {at:80, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:3},{side:1,op:'sub',v:300}]},
+    {at:100,t:'H', kind:'saw', x:2.4, w:3.4, cull:0.40},
+    {at:120,t:'G', g:[{side:-1,op:'sub',v:500},{side:1,op:'mul',v:2}]},
+    {at:142,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'add',v:200}]},
+  ]},
+  { name:'CRYO VAULT', hue:165, len:165, start:55, target:2800, ev:[
+    {at:20, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:150}]},
+    {at:40, t:'H', kind:'wall', x:0, w:3.2, cull:0.45},
+    {at:60, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'add',v:400},{side:1,op:'mul',v:3}]},
+    {at:80, t:'G', g:[{side:-1,op:'sub',v:1500},{side:1,op:'mul',v:3}]},
+    {at:100,t:'H', kind:'saw', x:-2.4, w:3.6, cull:0.46},
+    {at:122,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'mul',v:3}]},
+    {at:146,t:'H', kind:'spin', x:2.2, w:3.6, cull:0.44},
+  ]},
+  { name:'ECHO REACTOR', hue:120, len:175, start:70, target:11500, ev:[
+    {at:20, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
+    {at:40, t:'G', g:[{side:-1,op:'add',v:300},{side:1,op:'mul',v:3}]},
+    {at:58, t:'H', kind:'saw', x:1.8, w:3.6, cull:0.48},
+    {at:78, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'sub',v:3000}]},
+    {at:98, t:'H', kind:'spin', x:-2.2, w:3.8, cull:0.46},
+    {at:120,t:'G', g:[{side:-1,op:'sub',v:8000},{side:1,op:'mul',v:3}]},
+    {at:142,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:2000}]},
+    {at:160,t:'H', kind:'wall', x:0, w:3.0, cull:0.40},
+  ]},
+  { name:'STORM SPIRE', hue:50, len:185, start:90, target:80000, ev:[
+    {at:20, t:'G', g:[{side:-1,op:'mul',v:4},{side:1,op:'mul',v:3}]},
+    {at:40, t:'H', kind:'spin', x:-2.0, w:3.8, cull:0.50},
+    {at:60, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:4000}]},
+    {at:80, t:'G', g:[{side:-1,op:'sub',v:20000},{side:1,op:'mul',v:3}]},
+    {at:100,t:'H', kind:'saw', x:2.2, w:3.8, cull:0.50},
+    {at:120,t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'sub',v:30000}]},
+    {at:142,t:'H', kind:'wall', x:-2.2, w:3.4, cull:0.45},
+    {at:166,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
+  ]},
+  { name:'OVERLORD GATE', hue:300, len:200, start:120, target:700000, ev:[
+    {at:20, t:'G', g:[{side:-1,op:'mul',v:4},{side:1,op:'mul',v:3}]},
+    {at:40, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:10000}]},
+    {at:58, t:'H', kind:'saw', x:-2.0, w:4.0, cull:0.52},
+    {at:78, t:'G', g:[{side:-1,op:'sub',v:60000},{side:1,op:'mul',v:4}]},
+    {at:98, t:'H', kind:'spin', x:2.0, w:4.0, cull:0.52},
+    {at:118,t:'G', g:[{side:-1,op:'mul',v:3},{side:0,op:'mul',v:5},{side:1,op:'sub',v:100000}]},
+    {at:140,t:'H', kind:'wall', x:0, w:3.2, cull:0.48},
+    {at:162,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:4}]},
+    {at:182,t:'G', g:[{side:-1,op:'add',v:40000},{side:1,op:'mul',v:2}]},
+  ]},
+];
+
+/* ---------- SaveManager ---------- */
+const Save = {
+  get(k,d){ try{ const v=localStorage[`${NS}.${k}`]; return v==null?d:JSON.parse(v); }catch{ return d; } },
+  set(k,v){ try{ localStorage[`${NS}.${k}`]=JSON.stringify(v); }catch{} },
+};
+const Settings = {
+  music: Save.get('music',true), sfx: Save.get('sfx',true), haptic: Save.get('haptic',true),
+  save(){ Save.set('music',this.music); Save.set('sfx',this.sfx); Save.set('haptic',this.haptic); },
+};
+
+/* ---------- AudioManager (WebAudio synth; music builds with crowd) ---------- */
+const Audio = {
+  ctx:null, muted:Save.get('muted',false), master:null, musicGain:null, musicTimer:null, step:0,
+  ensure(){ if(!this.ctx){ this.ctx=new (window.AudioContext||window.webkitAudioContext)();
+      this.master=this.ctx.createGain(); this.master.gain.value=0.9; this.master.connect(this.ctx.destination);
+      this.musicGain=this.ctx.createGain(); this.musicGain.gain.value=0.0; this.musicGain.connect(this.master); }
+    if(this.ctx.state==='suspended') this.ctx.resume(); return this.ctx; },
+  note(f=440,d=.1,type='square',g=.18,dest=null){ if(this.muted||!Settings.sfx) return; const a=this.ensure();
+    const o=a.createOscillator(), gn=a.createGain(); o.type=type; o.frequency.value=f;
+    gn.gain.setValueAtTime(g,a.currentTime); gn.gain.exponentialRampToValueAtTime(.0001,a.currentTime+d);
+    o.connect(gn).connect(dest||this.master); o.start(); o.stop(a.currentTime+d); },
+  sfx(id){ const f={
+      steer:()=>this.note(420,.04,'triangle',.06),
+      add:  ()=>{ this.note(600,.08,'triangle',.16); this.note(900,.07,'sine',.10); },
+      mul:  ()=>[0,1,2].forEach((k,i)=>setTimeout(()=>this.note(520+k*180,.1,'sine',.16),i*55)),
+      bad:  ()=>this.note(150,.22,'sawtooth',.22),
+      cull: ()=>this.note(120,.28,'sawtooth',.26),
+      charge:()=>this.note(180,.5,'sawtooth',.18),
+      slam: ()=>{ this.note(90,.5,'sawtooth',.32); setTimeout(()=>this.note(70,.6,'square',.22),40); },
+      clear:()=>[523,659,784,1046,1318].forEach((f,i)=>setTimeout(()=>this.note(f,.16,'sine',.18),i*70)),
+      win:  ()=>[523,659,784,1046,1318,1568,2093].forEach((f,i)=>setTimeout(()=>this.note(f,.2,'sine',.2),i*90)),
+      over: ()=>this.note(110,.6,'sawtooth',.3),
+    }[id]; if(f) f(); },
+  // synthwave music bed; intensity (0..1) rises with crowd & stage
+  startMusic(){ if(this.musicTimer) return; this.ensure(); this.step=0;
+    const a=this.ctx; this.musicGain.gain.cancelScheduledValues(a.currentTime);
+    this.musicGain.gain.setTargetAtTime(Settings.music && !this.muted ? 0.5 : 0.0, a.currentTime, .4);
+    const bpm=128, stepDur=60/bpm/2*1000; // 8th notes
+    const scale=[0,3,5,7,10,12]; const root=110;
+    this.musicTimer=setInterval(()=>{
+      if(this.muted||!Settings.music){ return; }
+      const a=this.ctx, t=a.currentTime, s=this.step%16, inten=this._inten||0.2;
+      const mg=this.musicGain;
+      // bass on beats
+      if(s%2===0){ const o=a.createOscillator(),g=a.createGain(); o.type='sawtooth';
+        o.frequency.value=root*(s%8===0?1:(s%8===4?1.5:1)); g.gain.setValueAtTime(.18,t); g.gain.exponentialRampToValueAtTime(.001,t+.18);
+        o.connect(g).connect(mg); o.start(t); o.stop(t+.2); }
+      // arp when inten>.33
+      if(inten>0.33){ const n=scale[(this.step*3)%scale.length]; const o=a.createOscillator(),g=a.createGain();
+        o.type='triangle'; o.frequency.value=root*4*Math.pow(2,n/12); const v=.05+inten*.06;
+        g.gain.setValueAtTime(v,t); g.gain.exponentialRampToValueAtTime(.0008,t+.16); o.connect(g).connect(mg); o.start(t); o.stop(t+.18); }
+      // lead + hat when inten>.66
+      if(inten>0.66 && s%4===2){ const n=scale[(this.step*5)%scale.length]; const o=a.createOscillator(),g=a.createGain();
+        o.type='sawtooth'; o.frequency.value=root*8*Math.pow(2,n/12); g.gain.setValueAtTime(.05,t); g.gain.exponentialRampToValueAtTime(.001,t+.22);
+        o.connect(g).connect(mg); o.start(t); o.stop(t+.24); }
+      this.step++;
+    }, stepDur); },
+  setIntensity(v){ this._inten = clamp(v,0,1); },
+  stopMusic(){ if(this.musicTimer){ clearInterval(this.musicTimer); this.musicTimer=null; }
+    if(this.musicGain&&this.ctx) this.musicGain.gain.setTargetAtTime(0,this.ctx.currentTime,.2); },
+  syncMusicGain(){ if(this.musicGain&&this.ctx) this.musicGain.gain.setTargetAtTime((Settings.music&&!this.muted)?0.5:0.0, this.ctx.currentTime,.2); },
+};
+function haptic(ms){ if(Settings.haptic && navigator.vibrate) navigator.vibrate(ms); }
+
+/* ---------- Scene flow ---------- */
+const Scenes=['menu','how','pause','gameover'];
+function show(id){ Scenes.forEach(s=>$('#'+s).classList.toggle('hidden', s!==id));
+  $('#app').classList.toggle('overlay-open', id!==null && id!=='__none'); }
+function hideAll(){ Scenes.forEach(s=>$('#'+s).classList.add('hidden')); $('#app').classList.remove('overlay-open'); }
+
+/* ============================================================
+   STATE
+   ============================================================ */
+const S = {
+  mode:'menu', diff:'normal',
+  crowd:18, score:0, streak:0, stageIdx:0, stageClean:true,
+  dist:0, cx:0, targetX:0, keyDir:0,
+  speed:18, charging:false, slammed:false,
+  best:0, bestCrowd:0, bestStage:1,
+  evDone:[], shake:0, t:0,
+  _simAtBarrier:0, _simCleared:false,
+};
+let SIM_MODE = 0;   // 0 = off · 1 = full-run sim · 2 = isolate single stage
+
+/* ============================================================
+   THREE.JS SCENE
+   ============================================================ */
+const cv = $('#cv');
+let renderer, scene, camera, composer, bloomPass, sun, sunMat, ground, groundMat, rail=[], dirLight, hemi;
+let crowdMesh, crowdColors, formation=[], runnerPhase=[];
+let W=480, H=800, DPR=1;
+const MOBILE = matchMedia('(pointer:coarse)').matches || innerWidth<540;
+let lowFX = MOBILE;
+const dummy = new (THREE?THREE.Object3D:Object)();
+
+// pools
+const gatePool=[], hazPool=[]; let barrier=null, barrierLabel=null;
+const active = { gates:[], hazards:[], pickups:[] };
+const pickupPool=[];
+let particles=null, pPos, pVel, pLife, pCol, P_MAX=900, pCount=0;
+const labelCache = new Map();
+
+function makeLabelTexture(text, rgb){
+  const key=text+'|'+rgb; if(labelCache.has(key)) return labelCache.get(key);
+  const c=document.createElement('canvas'); c.width=256; c.height=128; const x=c.getContext('2d');
+  x.clearRect(0,0,256,128);
+  x.font='900 84px Orbitron, system-ui, sans-serif'; x.textAlign='center'; x.textBaseline='middle';
+  x.shadowColor=rgb; x.shadowBlur=20; x.fillStyle='#fff'; x.fillText(text,128,66);
+  x.shadowBlur=0; x.lineWidth=3; x.strokeStyle=rgb; x.strokeText(text,128,66);
+  const t=new THREE.CanvasTexture(c); t.anisotropy=2; labelCache.set(key,t); return t;
+}
+function fmt(n){ n=Math.floor(n);
+  if(n<10000) return ''+n;
+  if(n<1e6) return (n/1e3).toFixed(n<1e5?1:0)+'K';
+  if(n<1e9) return (n/1e6).toFixed(2)+'M';
+  return (n/1e9).toFixed(2)+'B';
+}
+
+function boot(){
+  renderer = new THREE.WebGLRenderer({ canvas:cv, antialias:!MOBILE, powerPreference:'high-performance' });
+  renderer.setClearColor(0x05060d, 1);
+  scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x05060d, 40, 120);
+  camera = new THREE.PerspectiveCamera(62, 480/800, 0.1, 400);
+  camera.position.set(0, 7.5, -11); camera.lookAt(0, 1.5, 12);
+
+  hemi = new THREE.HemisphereLight(0xbfd0ff, 0x10081a, 0.9); scene.add(hemi);
+  dirLight = new THREE.DirectionalLight(0xffffff, 1.1); dirLight.position.set(-6, 16, -4); scene.add(dirLight);
+
+  // ground track (scrolling synthwave grid texture)
+  groundMat = new THREE.MeshStandardMaterial({ color:0x0a0c18, roughness:.9, metalness:.1, map: makeGridTexture() });
+  ground = new THREE.Mesh(new THREE.PlaneGeometry((CONFIG.TRACK_HALF*2+2), 600), groundMat);
+  ground.rotation.x = -Math.PI/2; ground.position.set(0, 0, 240); scene.add(ground);
+
+  // neon rails
+  const railGeo = new THREE.BoxGeometry(0.18, 0.5, 600);
+  for(let s of [-1,1]){
+    const m = new THREE.MeshStandardMaterial({ color:0x111425, emissive:new THREE.Color(0xff3344), emissiveIntensity:1.4, roughness:.4 });
+    const r = new THREE.Mesh(railGeo, m); r.position.set(s*(CONFIG.TRACK_HALF+0.4), 0.25, 240); scene.add(r); rail.push(r);
+  }
+
+  // synthwave sun on the horizon
+  sunMat = new THREE.MeshBasicMaterial({ color:0xff5a8a, transparent:true, opacity:.9, fog:false });
+  sun = new THREE.Mesh(new THREE.CircleGeometry(26, 48), sunMat);
+  sun.position.set(0, 6, 320); scene.add(sun);
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color:0x3a1850, transparent:true, opacity:.5, fog:false }));
+  halo.position.set(0,6,330); scene.add(halo); sun.userData.halo=halo;
+
+  // crowd InstancedMesh (one draw call)
+  const rg = new THREE.CapsuleGeometry(CONFIG.RUNNER_R, 0.52, 3, 6);
+  const rm = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.45, metalness:.15,
+    emissive:new THREE.Color(0xff3344), emissiveIntensity:.55 });
+  crowdMesh = new THREE.InstancedMesh(rg, rm, CONFIG.RENDER_CAP);
+  crowdMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  crowdMesh.frustumCulled = false;
+  crowdColors = new Float32Array(CONFIG.RENDER_CAP*3);
+  const base=new THREE.Color(0xff3344), alt=new THREE.Color(0xffd24a), c=new THREE.Color();
+  for(let i=0;i<CONFIG.RENDER_CAP;i++){
+    c.copy(base).lerp(alt, Math.random()<0.18?Math.random()*0.7:0).offsetHSL(0,0,(Math.random()-0.5)*0.12);
+    c.toArray(crowdColors, i*3); crowdMesh.setColorAt(i, c);
+    // phyllotaxis formation offset
+    const r=CONFIG.SPACING*Math.sqrt(i+0.6), a=i*2.39996323;
+    formation.push({x:Math.cos(a)*r, z:Math.sin(a)*r});
+    runnerPhase.push(Math.random()*Math.PI*2);
+  }
+  crowdMesh.count = 0; scene.add(crowdMesh);
+
+  // gate / hazard / pickup pools
+  for(let i=0;i<6;i++) gatePool.push(makeGate());
+  for(let i=0;i<3;i++) hazPool.push(makeHazard());
+  for(let i=0;i<3;i++) pickupPool.push(makePickup());
+  barrier = makeBarrier(); scene.add(barrier);
+
+  // particle pool (THREE.Points, one draw call)
+  pPos=new Float32Array(P_MAX*3); pVel=new Float32Array(P_MAX*3); pLife=new Float32Array(P_MAX); pCol=new Float32Array(P_MAX*3);
+  const pg=new THREE.BufferGeometry();
+  pg.setAttribute('position', new THREE.BufferAttribute(pPos,3));
+  pg.setAttribute('color', new THREE.BufferAttribute(pCol,3));
+  const pm=new THREE.PointsMaterial({ size:0.5, vertexColors:true, transparent:true, opacity:.95, depthWrite:false, blending:THREE.AdditiveBlending });
+  particles=new THREE.Points(pg,pm); particles.frustumCulled=false; scene.add(particles);
+
+  // post-processing bloom (weak)
+  if(USE_BLOOM){
+    composer=new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene,camera));
+    bloomPass=new UnrealBloomPass(new THREE.Vector2(W,H), 0.62, 0.7, 0.82);
+    composer.addPass(bloomPass);
+    composer.addPass(new OutputPass());
+  }
+  resize();
+  requestAnimationFrame(loop);
+}
+
+function makeGridTexture(){
+  const c=document.createElement('canvas'); c.width=128; c.height=128; const x=c.getContext('2d');
+  x.fillStyle='#0a0c18'; x.fillRect(0,0,128,128);
+  x.strokeStyle='rgba(255,80,110,.55)'; x.lineWidth=3;
+  x.beginPath(); x.moveTo(0,0); x.lineTo(128,0); x.stroke();      // horizontal dash
+  x.strokeStyle='rgba(120,150,255,.18)'; x.lineWidth=2;
+  for(let i=0;i<=128;i+=32){ x.beginPath(); x.moveTo(i,0); x.lineTo(i,128); x.stroke(); }
+  const t=new THREE.CanvasTexture(c); t.wrapS=t.wrapT=THREE.RepeatWrapping; t.repeat.set(3,40); return t;
+}
+function makeGate(){
+  const g=new THREE.Group();
+  const panel=new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.TRACK_HALF, 4.4),
+    new THREE.MeshBasicMaterial({ color:0x44ff88, transparent:true, opacity:.28, side:THREE.DoubleSide, depthWrite:false }));
+  panel.position.y=2.2;
+  const frameMat=new THREE.MeshStandardMaterial({ color:0x222, emissive:new THREE.Color(0x44ff88), emissiveIntensity:1.6 });
+  const top=new THREE.Mesh(new THREE.BoxGeometry(CONFIG.TRACK_HALF,0.16,0.16), frameMat); top.position.y=4.4;
+  const post=new THREE.Mesh(new THREE.BoxGeometry(0.16,4.4,0.16), frameMat);
+  const label=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1.3), new THREE.MeshBasicMaterial({ transparent:true, depthWrite:false }));
+  label.position.set(0,2.4,-0.06); label.rotation.y=Math.PI;   // face the trailing camera (-Z), text not mirrored
+  g.add(panel,top,post,label); g.userData={panel,top,post,label,frameMat};
+  g.visible=false; scene.add(g); return g;
+}
+function makePickup(){
+  const m=new THREE.Mesh(new THREE.IcosahedronGeometry(0.8,0),
+    new THREE.MeshStandardMaterial({ color:0xffe27a, emissive:new THREE.Color(0xffd24a), emissiveIntensity:1.2, roughness:.3 }));
+  const label=new THREE.Mesh(new THREE.PlaneGeometry(2.2,1.1), new THREE.MeshBasicMaterial({transparent:true,depthWrite:false}));
+  label.position.set(0,1.7,-0.05); label.rotation.y=Math.PI; const g=new THREE.Group(); g.add(m,label); g.userData={core:m,label}; g.visible=false; scene.add(g); return g;
+}
+function makeHazard(){
+  const g=new THREE.Group();
+  const mat=new THREE.MeshStandardMaterial({ color:0x180406, emissive:new THREE.Color(0xff3322), emissiveIntensity:1.5, roughness:.4, metalness:.3 });
+  const bar=new THREE.Mesh(new THREE.BoxGeometry(3.0,0.5,0.5), mat);
+  const bar2=bar.clone();
+  g.add(bar,bar2); g.userData={mat,bar,bar2}; g.visible=false; scene.add(g); return g;
+}
+function makeBarrier(){
+  const g=new THREE.Group();
+  const wall=new THREE.Mesh(new THREE.BoxGeometry(CONFIG.TRACK_HALF*2, 5.4, 1.0),
+    new THREE.MeshStandardMaterial({ color:0x1a070c, emissive:new THREE.Color(0xff3344), emissiveIntensity:0.5, roughness:.5, metalness:.4 }));
+  wall.position.y=2.7;
+  const label=new THREE.Mesh(new THREE.PlaneGeometry(6.4,3.2), new THREE.MeshBasicMaterial({transparent:true,depthWrite:false}));
+  label.position.set(0,3.2,-0.72); label.rotation.y=Math.PI;
+  g.add(wall,label); g.userData={wall,label}; g.visible=false; return g;
+}
+
+/* ---------- particle burst ---------- */
+function burst(x,y,z,color,n,spread,up){
+  const col=new THREE.Color(color);
+  for(let i=0;i<n;i++){
+    const idx=pCount%P_MAX; pCount++;
+    pPos[idx*3]=x+(Math.random()-.5)*1.5; pPos[idx*3+1]=y+Math.random()*1.5; pPos[idx*3+2]=z+(Math.random()-.5)*1.5;
+    const a=Math.random()*Math.PI*2, sp=spread*(0.4+Math.random());
+    pVel[idx*3]=Math.cos(a)*sp; pVel[idx*3+1]=(up||3)*(0.5+Math.random()); pVel[idx*3+2]=Math.sin(a)*sp;
+    pLife[idx]=0.6+Math.random()*0.5;
+    pCol[idx*3]=col.r; pCol[idx*3+1]=col.g; pCol[idx*3+2]=col.b;
+  }
+}
+function updateParticles(dt){
+  let maxIdx=0;
+  for(let i=0;i<P_MAX;i++){
+    if(pLife[i]>0){
+      pLife[i]-=dt;
+      pVel[i*3+1]-=9*dt;
+      pPos[i*3]+=pVel[i*3]*dt; pPos[i*3+1]+=pVel[i*3+1]*dt; pPos[i*3+2]+=pVel[i*3+2]*dt;
+      if(pPos[i*3+1]<0){ pPos[i*3+1]=0; pVel[i*3+1]*=-0.3; }
+      maxIdx=i+1;
+    } else { pPos[i*3+1]=-999; }
+  }
+  particles.geometry.attributes.position.needsUpdate=true;
+  particles.geometry.attributes.color.needsUpdate=true;
+  particles.geometry.setDrawRange(0, maxIdx);
+}
+
+/* ============================================================
+   STAGE SETUP & EVENT SPAWNING
+   ============================================================ */
+const GREEN=0x44ff88, BLUE=0x59b8ff, RED=0xff4455, GOLD=0xffd24a;
+function curStage(){ return STAGES[S.stageIdx]; }
+function stageTarget(st){ return Math.round(st.target*CONFIG.TARGET_MULT[S.diff]); }
+function startCrowd(st){ return Math.max(4, Math.round(st.start*CONFIG.START_MULT[S.diff])); }
+
+function setupStage(){
+  const st=curStage();
+  S.dist=0; S.cx=0; S.targetX=0; S.charging=false; S.slammed=false;
+  S.crowd = startCrowd(st);                       // fresh per-stage start (no carryover)
+  if(S.crowd>S.bestCrowd) S.bestCrowd=S.crowd;
+  S.evDone = st.ev.map(()=>false);
+  st.ev.forEach(e=>{ e._spawned=false; });         // re-arm visuals for this stage
+  // reset active visuals to pool
+  active.gates.length=0; active.hazards.length=0; active.pickups.length=0;
+  gatePool.forEach(g=>g.visible=false); hazPool.forEach(h=>h.visible=false); pickupPool.forEach(p=>p.visible=false);
+  barrier.visible=false;
+  // biome color
+  const hue=st.hue, col=new THREE.Color().setHSL(hue/360,0.8,0.6);
+  scene.fog.color.setHSL(hue/360,0.5,0.04); renderer.setClearColor(scene.fog.color,1);
+  rail.forEach(r=>r.material.emissive.copy(col));
+  groundMat.map && groundMat.map.dispose && 0;
+  sunMat.color.setHSL(((hue+20)%360)/360,0.85,0.62);
+  // place barrier at stage end
+  barrier.position.set(0,0, st.len);
+  barrier.userData.wall.material.emissive.copy(new THREE.Color(0xff3344));
+  barrier.userData.label.material.map = makeLabelTexture(fmt(stageTarget(st)), '#ff5a6a');
+  barrier.userData.label.material.needsUpdate=true;
+  updateHUD(); updateTargetHUD();
+}
+
+function opLabel(o){ return o.op==='mul' ? '×'+o.v : o.op==='add' ? '+'+fmt(o.v) : '−'+fmt(o.v); }
+function opColor(o){ return o.op==='sub' ? RED : o.op==='mul' ? GREEN : BLUE; }
+
+function spawnGateVisual(ev){
+  const opts=ev.g;
+  // position gates by side; we use up to 3 segments
+  opts.forEach(o=>{
+    const g=gatePool.find(x=>!x.visible) || makeGate(); g.visible=true;
+    const segW = opts.length>=3 ? CONFIG.TRACK_HALF*2/3 : CONFIG.TRACK_HALF;
+    const segX = o.side * (opts.length>=3 ? (CONFIG.TRACK_HALF*2/3) : (CONFIG.TRACK_HALF/2));
+    const ud=g.userData; const col=opColor(o);
+    ud.panel.geometry.dispose(); ud.panel.geometry=new THREE.PlaneGeometry(segW-0.2,4.4);
+    ud.panel.material.color.setHex(col);
+    ud.frameMat.emissive.setHex(col);
+    ud.top.geometry.dispose(); ud.top.geometry=new THREE.BoxGeometry(segW-0.2,0.16,0.16);
+    ud.label.material.map=makeLabelTexture(opLabel(o), '#'+col.toString(16).padStart(6,'0')); ud.label.material.needsUpdate=true;
+    ud.label.material.color.setHex(0xffffff);
+    g.position.set(segX, 0, ev.at);
+    g.userData.op=o; g.userData.evRef=ev;
+    active.gates.push(g);
+  });
+}
+function spawnHazardVisual(ev){
+  const h=hazPool.find(x=>!x.visible)||makeHazard(); h.visible=true;
+  h.userData.bar.geometry.dispose(); h.userData.bar.geometry=new THREE.BoxGeometry(ev.w,0.5,0.5);
+  h.userData.bar2.geometry.dispose(); h.userData.bar2.geometry=new THREE.BoxGeometry(ev.w,0.5,0.5);
+  h.userData.bar2.rotation.z=Math.PI/2;
+  h.position.set(ev.x,1.3,ev.at); h.userData.ev=ev; h.userData.kind=ev.kind;
+  active.hazards.push(h);
+}
+function spawnPickupVisual(ev){
+  const p=pickupPool.find(x=>!x.visible)||makePickup(); p.visible=true;
+  p.position.set(ev.x,1.0,ev.at);
+  p.userData.label.material.map=makeLabelTexture('+'+fmt(ev.v),'#ffd24a'); p.userData.label.material.needsUpdate=true;
+  p.userData.ev=ev; active.pickups.push(p);
+}
+
+/* ============================================================
+   GAME LOGIC — step() is the deterministic core (used by sim too)
+   ============================================================ */
+function setCrowd(n, isLoss){
+  n=clamp(Math.round(n),0,CONFIG.MAX_LOGIC);
+  if(isLoss) S.stageClean=false;
+  S.crowd=n;
+  if(S.crowd>S.bestCrowd) S.bestCrowd=S.crowd;
+}
+function applyGateOp(o){
+  const before=S.crowd;
+  if(o.op==='mul') setCrowd(S.crowd*o.v,false);
+  else if(o.op==='add') setCrowd(S.crowd+o.v,false);
+  else setCrowd(S.crowd-o.v,true);
+  return S.crowd-before;
+}
+function chooseGateSide(opts){
+  // pick option whose lane-x is nearest current centroid
+  let best=opts[0], bd=1e9;
+  for(const o of opts){
+    const lx = opts.length>=3 ? o.side*(CONFIG.TRACK_HALF*2/3) : o.side*(CONFIG.TRACK_HALF/2);
+    const d=Math.abs(S.cx-lx); if(d<bd){ bd=d; best=o; }
+  }
+  return best;
+}
+
+function applyEvent(i, fx){
+  const st=curStage(), ev=st.ev[i]; S.evDone[i]=true;
+  if(ev.t==='G'){
+    const o=chooseGateSide(ev.g);
+    const delta=applyGateOp(o);
+    if(fx){
+      const col = o.op==='sub'?RED:(o.op==='mul'?GREEN:BLUE);
+      const wx = o.side*(ev.g.length>=3?(CONFIG.TRACK_HALF*2/3):(CONFIG.TRACK_HALF/2));
+      burst(wx,2,S.dist+0,col, o.op==='sub'?22:30, o.op==='sub'?2:4, 4);
+      popCrowd(); flashHud(o.op);
+      Audio.sfx(o.op==='mul'?'mul':o.op==='add'?'add':'bad');
+      haptic(o.op==='sub'?60:16);
+      if(o.op==='sub') screenShake(0.5);
+    }
+    if(S.crowd<=0) return fail(fx);
+  } else if(ev.t==='H'){
+    const cull=ev.cull*CONFIG.HAZARD_MULT[S.diff];
+    const hit = Math.abs(S.cx - ev.x) < ev.w/2;
+    if(hit){
+      setCrowd(S.crowd*(1-cull), true);
+      if(fx){ burst(ev.x,2,S.dist,RED,28,3.5,5); Audio.sfx('cull'); haptic(80); screenShake(0.8); flashHud('sub'); popCrowd(); }
+      if(S.crowd<=0) return fail(fx);
+    }
+  } else if(ev.t==='P'){
+    const hit=Math.abs(S.cx-ev.x)<1.5;
+    if(hit){ setCrowd(S.crowd+ev.v,false); if(fx){ burst(ev.x,2,S.dist,GOLD,24,3,4); Audio.sfx('add'); popCrowd(); haptic(12);} }
+  }
+  return true;
+}
+
+function step(dt, fx){
+  // steering: keyboard nudges target; centroid chases target
+  if(S.keyDir) S.targetX = clamp(S.targetX + S.keyDir*CONFIG.KEY_SPEED*dt, -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN), CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN);
+  S.cx = lerp(S.cx, S.targetX, clamp(dt*CONFIG.STEER_LERP,0,1));
+  // forward speed (charge near barrier)
+  const st=curStage();
+  S.charging = S.dist > st.len - 16;
+  const sp = S.speed * (S.charging?CONFIG.CHARGE_MULT:1);
+  S.dist += sp*dt;
+  // events
+  for(let i=0;i<st.ev.length;i++){ if(!S.evDone[i] && S.dist>=st.ev[i].at){ if(!applyEvent(i,fx)) return; } }
+  // reached barrier?
+  if(!S.slammed && S.dist>=st.len){ S.slammed=true; resolveBarrier(fx); }
+}
+
+function resolveBarrier(fx){
+  const st=curStage(), tgt=stageTarget(st);
+  if(SIM_MODE===2){ S._simAtBarrier=S.crowd; S._simCleared=(S.crowd>=tgt); S.mode='simdone'; return; }
+  if(S.crowd>=tgt){
+    // SMASH
+    const gain = Math.floor(S.crowd*CONFIG.SCORE_SLAM) + CONFIG.SCORE_CLEAR + Math.floor((S.crowd-tgt)*CONFIG.SCORE_SURPLUS);
+    const mult = 1 + Math.min(S.streak,CONFIG.STREAK_MAX)*CONFIG.STREAK_STEP;
+    const add = Math.floor(gain*mult);
+    S.score += add;
+    if(S.stageClean) S.streak=Math.min(S.streak+1,CONFIG.STREAK_MAX); else S.streak=0;
+    if(fx){
+      slamFX(); Audio.sfx('slam'); setTimeout(()=>Audio.sfx('clear'),250); haptic([20,40,30,60]);
+      banner(S.stageIdx>=STAGES.length-1?'VICTORY':'STAGE CLEAR', '+'+fmt(add)+(mult>1?'  🔥×'+mult.toFixed(1):''));
+    }
+    S.stageIdx++;
+    if(S.stageIdx>=STAGES.length){ return victory(fx); }
+    else { S.stageClean=true; if(fx) setTimeout(()=>{ if(S.mode==='playing'){ setupStage(); introBanner(); } }, 1100);
+           else setupStage(); }
+  } else {
+    return fail(fx, true);
+  }
+}
+
+function fail(fx, atBarrier){
+  if(S.mode==='dead') return false;
+  S.mode = fx? 'dead' : 'simdead';
+  if(fx){
+    if(atBarrier){ screenShake(1.2); burst(0,2,S.dist,RED,60,5,3); banner('BARRIER HELD','Not enough legion'); }
+    else { screenShake(1.0); burst(S.cx,2,S.dist,RED,50,5,3); banner('LEGION LOST','Wiped out'); }
+    Audio.sfx('over'); haptic([60,40,60,40,120]);
+    setTimeout(()=>gameOver(false), 900);
+  }
+  return false;
+}
+function victory(fx){
+  if(fx){ Audio.sfx('win'); slamFX(); setTimeout(()=>gameOver(true),900); }
+  S.mode = fx?'won':'simwon';
+  return false;
+}
+
+/* ============================================================
+   FLOW
+   ============================================================ */
+function loadBests(){ S.best=Save.get('best.'+S.diff,0); S.bestCrowd=Save.get('bestCrowd.'+S.diff,0); S.bestStage=Save.get('bestStage.'+S.diff,1); }
+function startGame(){
+  Audio.ensure(); resize();
+  loadBests();
+  Object.assign(S,{ mode:'playing', score:0, streak:0, stageIdx:0, stageClean:true,
+    speed:CONFIG.RUN_SPEED[S.diff], keyDir:0, shake:0 });
+  setupStage(); hideAll(); introBanner();   // setupStage sets the fresh per-stage crowd
+  Audio.startMusic(); Audio.setIntensity(0.2);
+  $('#hint').classList.add('on'); setTimeout(()=>$('#hint').classList.remove('on'), 3200);
+}
+function pauseGame(){ if(S.mode!=='playing') return; S.mode='paused'; Audio.stopMusic(); show('pause'); }
+function resumeGame(){ if(S.mode!=='paused') return; S.mode='playing'; hideAll(); last=performance.now(); Audio.startMusic(); }
+function gameOver(won){
+  S.mode = won?'won':'over';
+  Audio.stopMusic();
+  if(S.score>S.best){ S.best=S.score; Save.set('best.'+S.diff,S.best); }
+  if(S.bestCrowd>Save.get('bestCrowd.'+S.diff,0)) Save.set('bestCrowd.'+S.diff,S.bestCrowd);
+  const reached=S.stageIdx+1>STAGES.length?STAGES.length:S.stageIdx+1;
+  if(reached>Save.get('bestStage.'+S.diff,1)) Save.set('bestStage.'+S.diff,reached);
+  $('#goKick').textContent = won?'LEGION TRIUMPHANT':'Legion fallen';
+  $('#finalScore').textContent = fmt(S.score);
+  $('#goBest').textContent = fmt(S.best);
+  $('#goCrowd').textContent = fmt(S.bestCrowd);
+  $('#goStage').textContent = won? STAGES.length+'/'+STAGES.length+' ✓' : (Math.min(S.stageIdx+1,STAGES.length))+'/'+STAGES.length;
+  Save.set('plays',(Save.get('plays',0)+1));
+  show('gameover');
+}
+function toMenu(){ S.mode='menu'; Audio.stopMusic(); loadBests();
+  $('#bestVal').textContent=fmt(S.best); $('#bestCrowdVal').textContent=fmt(S.bestCrowd); show('menu'); }
+
+/* ============================================================
+   HUD / FX
+   ============================================================ */
+function updateHUD(){
+  $('#crowd').textContent = fmt(S.crowd);
+  $('#scoreChip').firstChild.textContent = fmt(S.score);
+  const st=curStage();
+  $('#stageChip').firstChild.textContent = 'STAGE '+(S.stageIdx+1)+'/'+STAGES.length;
+  $('#stageName').textContent = st?st.name:'';
+  const mult=1+Math.min(S.streak,CONFIG.STREAK_MAX)*CONFIG.STREAK_STEP;
+  const sc=$('#streakChip'); if(S.streak>0){ sc.classList.add('on'); sc.textContent='🔥×'+mult.toFixed(1); } else sc.classList.remove('on');
+}
+function updateTargetHUD(){
+  const st=curStage(); if(!st) return;
+  $('#tgtVal').textContent=fmt(stageTarget(st));
+  const p=clamp(S.dist/st.len,0,1)*100; $('#progFill').style.width=p+'%';
+  $('#distLbl').textContent = S.charging?'⚡ CHARGE':'STAGE '+(S.stageIdx+1);
+}
+let popTimer=null;
+function popCrowd(){ const el=$('#crowd'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
+function flashHud(op){ /* tint crowd number briefly */
+  const el=$('#crowd'); el.style.color = op==='sub'?'#ff6a7a':(op==='mul'?'#7CFFA0':'#9ad0ff');
+  clearTimeout(popTimer); popTimer=setTimeout(()=>el.style.color='#fff',260);
+}
+function banner(t,s){ const b=$('#banner'); $('#bTitle').textContent=t; $('#bSub').textContent=s||'';
+  b.classList.remove('show'); void b.offsetWidth; b.classList.add('show'); }
+function introBanner(){ const st=curStage(); banner('STAGE '+(S.stageIdx+1), st.name); }
+function screenShake(a){ S.shake=Math.max(S.shake,a); }
+function slamFX(){ const f=$('#flash'); f.style.transition='none'; f.style.opacity='0.9';
+  requestAnimationFrame(()=>{ f.style.transition='opacity .5s'; f.style.opacity='0'; });
+  screenShake(1.3); burst(0,2,S.dist,GOLD,70,6,5); burst(0,2,S.dist,0xffffff,40,4,6); }
+
+/* ============================================================
+   RENDER
+   ============================================================ */
+function updateCrowdInstances(now){
+  const n=Math.min(Math.max(S.crowd,1), CONFIG.RENDER_CAP);
+  crowdMesh.count = (S.mode==='playing'||S.mode==='paused'||S.mode==='dead'||S.mode==='won')? n : (S.mode==='menu'?0:n);
+  const t=now*0.001;
+  for(let i=0;i<n;i++){
+    const f=formation[i];
+    const bob=Math.abs(Math.sin(t*CONFIG.BOB_RATE + runnerPhase[i]))*0.28;
+    dummy.position.set(S.cx+f.x, 0.55+bob, S.dist+f.z + (Math.sin(t*CONFIG.BOB_RATE+runnerPhase[i])*0.06));
+    dummy.rotation.set(-0.16, 0, Math.sin(t*CONFIG.BOB_RATE*0.5+runnerPhase[i])*0.06);
+    const sc=0.95+0.1*Math.sin(t*8+runnerPhase[i]);
+    dummy.scale.set(1,sc,1);
+    dummy.updateMatrix(); crowdMesh.setMatrixAt(i, dummy.matrix);
+  }
+  crowdMesh.instanceMatrix.needsUpdate=true;
+}
+function recycleWorld(){
+  // hide gates/hazards/pickups that the crowd has fully passed
+  active.gates = active.gates.filter(g=>{ if(g.position.z < S.dist-6){ g.visible=false; return false; } return true; });
+  active.hazards = active.hazards.filter(h=>{ if(h.position.z < S.dist-6){ h.visible=false; return false; } return true; });
+  active.pickups = active.pickups.filter(p=>{ if(p.position.z < S.dist-6 || (p.userData.ev && p.userData.ev.taken)){ p.visible=false; return false; } return true; });
+}
+function spawnVisualsAhead(){
+  const st=curStage(); if(!st) return;
+  for(let i=0;i<st.ev.length;i++){
+    const ev=st.ev[i];
+    if(ev.at - S.dist < 60 && ev.at - S.dist > -8 && !ev._spawned){
+      ev._spawned=true;
+      if(ev.t==='G') spawnGateVisual(ev);
+      else if(ev.t==='H') spawnHazardVisual(ev);
+      else if(ev.t==='P') spawnPickupVisual(ev);
+    }
+    if(ev.at - S.dist > 70) ev._spawned=false; // allow re-arm on restart only (dist resets)
+  }
+  barrier.visible = (st.len - S.dist) < 70;
+}
+
+function render(now){
+  // camera follow
+  const camTargetX = S.cx*0.45;
+  camera.position.x = lerp(camera.position.x, camTargetX, 0.08);
+  camera.position.z = lerp(camera.position.z, S.dist-11, 0.18);
+  camera.position.y = 7.5;
+  // shake
+  if(S.shake>0){ camera.position.x += (Math.random()-.5)*S.shake; camera.position.y += (Math.random()-.5)*S.shake*0.6; S.shake*=0.86; if(S.shake<0.02)S.shake=0; }
+  camera.lookAt(S.cx*0.3, 1.5, S.dist+14);
+  // scroll ground + keep big props near crowd
+  ground.position.z = S.dist + 240;
+  if(groundMat.map) groundMat.map.offset.y = -S.dist*0.05;
+  rail.forEach(r=>r.position.z=S.dist+240);
+  sun.position.z = S.dist+320; sun.userData.halo.position.z=S.dist+330;
+  // spin hazards
+  active.hazards.forEach(h=>{ h.rotation.z += 0.06; if(h.userData.kind==='spin') h.rotation.y+=0.04; });
+  active.pickups.forEach(p=>{ p.userData.core.rotation.y+=0.05; p.position.y=1.0+Math.sin(now*0.004)*0.2; });
+  if(USE_BLOOM && composer) composer.render(); else renderer.render(scene,camera);
+}
+function snapCamera(){ // place camera at its settled follow pose immediately (for screenshots / fresh stage)
+  camera.position.set(S.cx*0.45, 7.5, S.dist-11); camera.lookAt(S.cx*0.3, 1.5, S.dist+14);
+}
+
+/* ============================================================
+   MAIN LOOP — fixed-tick logic + interpolated render
+   ============================================================ */
+let last=0, acc=0; const TICK=1/60;
+let frames=0, fpsT=0;
+function loop(now){
+  const dt=Math.min((now-(last||now))/1000, 0.05); last=now; S.t=now;
+  // fps watch -> lowFX
+  frames++; if(now-fpsT>1000){ if(frames<42 && !lowFX){ lowFX=true; applyLowFX(); } frames=0; fpsT=now; }
+  if(S.mode==='playing'){
+    acc+=dt;
+    let guard=0;
+    while(acc>=TICK && S.mode==='playing' && guard++<8){ step(TICK,true); acc-=TICK; }
+    // music intensity from crowd (log) + stage
+    const inten = clamp(Math.log10(Math.max(10,S.crowd))/5 + S.stageIdx*0.05, 0.2, 1);
+    Audio.setIntensity(inten);
+    spawnVisualsAhead(); recycleWorld(); updateHUD(); updateTargetHUD();
+  }
+  updateCrowdInstances(now);
+  updateParticles(dt);
+  render(now);
+  if(DEBUG){ const a=crowdMesh.instanceMatrix.array;
+    document.title='cnt='+crowdMesh.count+' mode='+S.mode+' crowd='+S.crowd+' dist='+S.dist.toFixed(0)
+      +' camZ='+camera.position.z.toFixed(1)+' camY='+camera.position.y.toFixed(1)
+      +' inst0=('+a[12].toFixed(1)+','+a[13].toFixed(1)+','+a[14].toFixed(1)+')'; }
+  requestAnimationFrame(loop);
+}
+function applyLowFX(){
+  DPR=Math.min(DPR,1.4); renderer.setPixelRatio(DPR);
+  if(bloomPass) bloomPass.strength=0.4;
+  console.log('lowFX enabled');
+}
+
+/* ---------- resize ---------- */
+function resize(){
+  const r=cv.getBoundingClientRect(); W=Math.max(1,r.width); H=Math.max(1,r.height);
+  DPR=Math.min(devicePixelRatio||1, lowFX?1.4:(MOBILE?2:2.5));
+  renderer.setPixelRatio(DPR); renderer.setSize(W,H,false);
+  camera.aspect=W/H; camera.updateProjectionMatrix();
+  if(composer){ composer.setSize(W,H); composer.setPixelRatio(DPR); if(bloomPass) bloomPass.resolution.set(W,H); }
+}
+addEventListener('resize', resize);
+
+/* ============================================================
+   INPUT
+   ============================================================ */
+let dragging=false, dragX=0, dragStartCx=0;
+function pdown(e){ if(S.mode!=='playing') return; Audio.ensure(); dragging=true;
+  dragX=e.clientX; dragStartCx=S.targetX; try{cv.setPointerCapture(e.pointerId);}catch{} }
+function pmove(e){ if(!dragging||S.mode!=='playing') return;
+  const dx=e.clientX-dragX; const world=(dx/Math.max(1,W))*(CONFIG.TRACK_HALF*2)*CONFIG.STEER_SENS;
+  S.targetX=clamp(dragStartCx+world, -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN), CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN); }
+function pup(e){ dragging=false; }
+cv.addEventListener('pointerdown', pdown);
+cv.addEventListener('pointermove', pmove);
+cv.addEventListener('pointerup', pup);
+cv.addEventListener('pointercancel', pup);
+addEventListener('keydown', e=>{
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') S.keyDir=-1;
+  else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') S.keyDir=1;
+  else if(e.key==='Escape'||e.key===' '){ if(S.mode==='playing')pauseGame(); else if(S.mode==='paused')resumeGame(); }
+});
+addEventListener('keyup', e=>{ if(['ArrowLeft','ArrowRight','a','A','d','D'].includes(e.key)) S.keyDir=0; });
+
+/* ---------- Wire UI ---------- */
+$('#diffPills').addEventListener('click', e=>{ const p=e.target.closest('.pill'); if(!p) return;
+  S.diff=p.dataset.diff; [...$('#diffPills').children].forEach(c=>c.classList.toggle('on',c===p));
+  Audio.ensure(); Audio.note(700,.05,'triangle',.1); loadBests();
+  $('#bestVal').textContent=fmt(S.best); $('#bestCrowdVal').textContent=fmt(S.bestCrowd); });
+$('#playBtn').onclick   = ()=>{ Audio.ensure(); if(!Save.get('onboarded',false)){ Save.set('onboarded',true); show('how'); } else startGame(); };
+$('#howBtn').onclick    = ()=> show('how');
+$('#howOk').onclick     = ()=> startGame();
+$('#pauseBtn').onclick  = ()=> S.mode==='playing'?pauseGame():resumeGame();
+$('#resumeBtn').onclick = resumeGame;
+$('#quitBtn').onclick   = toMenu;
+$('#retryBtn').onclick  = startGame;
+$('#menuBtn').onclick   = toMenu;
+$('#muteBtn').onclick   = ()=>{ Audio.muted=!Audio.muted; Save.set('muted',Audio.muted); $('#muteBtn').textContent=Audio.muted?'🔇':'🔊'; Audio.ensure(); Audio.syncMusicGain(); };
+function bindSwitch(el,key){ const sw=$(el); const sync=()=>sw.classList.toggle('on',Settings[key]);
+  sync(); sw.onclick=()=>{ Settings[key]=!Settings[key]; Settings.save(); sync(); if(key==='music')Audio.syncMusicGain(); }; }
+bindSwitch('#swMusic','music'); bindSwitch('#swSfx','sfx'); bindSwitch('#swHaptic','haptic');
+
+/* ============================================================
+   BALANCE SIM — bots play every stage via real step() logic.
+   Run: ?shot=sim  (or window._sim()). SIM mode skips FX.
+   ============================================================ */
+function _gv(o){ return o.op==='mul'?S.crowd*o.v : o.op==='add'?S.crowd+o.v : S.crowd-o.v; }
+function _nextEv(){ const st=curStage(); for(let i=0;i<st.ev.length;i++) if(!S.evDone[i]) return st.ev[i]; return null; }
+function _laneX(ev,o){ return ev.g.length>=3 ? o.side*(CONFIG.TRACK_HALF*2/3) : o.side*(CONFIG.TRACK_HALF/2); }
+function _botDecide(style, ev){               // teleports bot centroid for the next pending event
+  if(!ev) return;
+  if(ev.t==='G'){
+    const pick = style==='greedy' ? ev.g.reduce((a,b)=>_gv(b)>_gv(a)?b:a) : ev.g[(Math.random()*ev.g.length)|0];
+    const lx=_laneX(ev,pick); S.targetX=lx; S.cx=lx;
+  } else if(ev.t==='H'){
+    if(style==='greedy'){ const safe = ev.x>0 ? -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN) : (CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN); S.targetX=safe; S.cx=safe; }
+  } else if(ev.t==='P'){ if(style==='greedy'){ S.targetX=ev.x; S.cx=ev.x; } }
+}
+function _simStage(diff, idx, style){          // isolate ONE stage, fresh start, stop at barrier
+  SIM_MODE=2; S.diff=diff;
+  Object.assign(S,{ mode:'playing', stageIdx:idx, streak:0, stageClean:true, speed:CONFIG.RUN_SPEED[diff], score:0, bestCrowd:0, _simAtBarrier:0, _simCleared:false });
+  setupStage(); const startC=S.crowd; let guard=0;
+  while(S.mode==='playing' && guard++<200000){ _botDecide(style,_nextEv()); step(TICK,false); }
+  SIM_MODE=0;
+  const reached = S.mode==='simdone';
+  return { idx:idx+1, name:STAGES[idx].name, start:startC, atBarrier:reached?S._simAtBarrier:0,
+           target:stageTarget(STAGES[idx]), cleared:reached&&S._simCleared };
+}
+function _simRun(diff, style){                  // full run; no carryover (each stage fresh)
+  SIM_MODE=1; S.diff=diff;
+  Object.assign(S,{ mode:'playing', stageIdx:0, streak:0, stageClean:true, score:0, bestCrowd:0, speed:CONFIG.RUN_SPEED[diff] });
+  setupStage(); let guard=0;
+  while(S.mode==='playing' && guard++<400000){ _botDecide(style,_nextEv()); step(TICK,false); }
+  SIM_MODE=0;
+  return { result:S.mode, stage:Math.min(S.stageIdx+1,STAGES.length), score:S.score, crowd:S.bestCrowd };
+}
+function _simAll(){
+  let out='LEGION RUSH — balance sim (real step() logic, no carryover)\n'+'='.repeat(72)+'\n';
+  for(const diff of ['easy','normal','hard']){
+    out+='\n['+diff.toUpperCase()+']\n';
+    out+='  st  name           start  greedy@bar  careless@bar(clr%)   target   greedy\n';
+    for(let i=0;i<STAGES.length;i++){
+      const g=_simStage(diff,i,'greedy');
+      let cs=[],cc=0; const N=16;
+      for(let k=0;k<N;k++){ const c=_simStage(diff,i,'careless'); cs.push(c.atBarrier); if(c.cleared)cc++; }
+      const cavg=Math.round(cs.reduce((a,b)=>a+b,0)/N);
+      out+='  '+String(g.idx).padEnd(3)+g.name.padEnd(15)+String(g.start).padStart(5)+'  '+fmt(g.atBarrier).padStart(9)
+         +'   '+(fmt(cavg)+'('+Math.round(cc/N*100)+'%)').padStart(15)+'   '+fmt(g.target).padStart(7)+'   '+(g.cleared?'CLEAR':'**FAIL**')+'\n';
+    }
+    const gr=_simRun(diff,'greedy');
+    let cr=[]; for(let k=0;k<14;k++) cr.push(_simRun(diff,'careless').stage);
+    const cavgRun=(cr.reduce((a,b)=>a+b,0)/cr.length).toFixed(1);
+    out+='  FULL greedy: reached '+gr.stage+'/8 ('+gr.result+') score='+fmt(gr.score)+' bestCrowd='+fmt(gr.crowd)+'\n';
+    out+='  FULL careless: avg '+cavgRun+'/8  ['+cr.join(',')+']\n';
+  }
+  SIM_MODE=0; S.mode='menu';
+  return out;
+}
+
+/* ============================================================
+   ?shot= hooks for headless screenshots + dev helpers
+   ============================================================ */
+function applyShot(){
+  const m=new URLSearchParams(location.search).get('shot'); if(!m) { toMenu(); return; }
+  const [scene,arg]=m.split(':'); const n=arg?parseInt(arg,10):1;
+  const diffParam=new URLSearchParams(location.search).get('diff'); if(diffParam){ S.diff=diffParam; [...$('#diffPills').children].forEach(c=>c.classList.toggle('on',c.dataset.diff===diffParam)); }
+  if(scene==='sim'){ const o=_simAll(); const pre=$('#simOut'); pre.style.display='block'; pre.textContent=o; console.log(o); document.title='SIM DONE'; return; }
+  if(scene==='selftest'){
+    const out=[]; const r=cv.getBoundingClientRect();
+    S.mode='playing'; S.targetX=0; S.cx=0;                       // exercise the REAL pointer listeners on cv
+    cv.dispatchEvent(new PointerEvent('pointerdown',{clientX:r.left+90,clientY:r.top+450,bubbles:true,pointerId:1}));
+    cv.dispatchEvent(new PointerEvent('pointermove',{clientX:r.left+90+W*0.30,clientY:r.top+450,bubbles:true,pointerId:1}));
+    cv.dispatchEvent(new PointerEvent('pointerup',{clientX:r.left+90+W*0.30,clientY:r.top+450,bubbles:true,pointerId:1}));
+    out.push('drag-right -> targetX='+S.targetX.toFixed(2)+'  '+(S.targetX>0.4?'PASS':'FAIL'));
+    S.mode='playing'; S.keyDir=0;
+    dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
+    out.push('key ArrowLeft -> keyDir='+S.keyDir+'  '+(S.keyDir===-1?'PASS':'FAIL'));
+    dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',bubbles:true}));
+    const r1=_simStage('normal',0,'greedy'); out.push('stage1 greedy cleared='+r1.cleared+' @bar='+fmt(r1.atBarrier)+'  '+(r1.cleared?'PASS':'FAIL'));
+    out.push('console errors = '+window.__errs.length+(window.__errs.length?'  '+JSON.stringify(window.__errs.slice(0,4)):'  PASS'));
+    const ok = out.every(x=>!x.includes('FAIL')) && window.__errs.length===0;
+    const pre=$('#simOut'); pre.style.display='block'; pre.textContent='SELFTEST '+(ok?'OK':'CHECK')+'\n'+out.join('\n'); document.title='SELFTEST '+(ok?'OK':'CHECK'); S.mode='menu'; return;
+  }
+  toMenu();
+  if(scene==='menu'){ return; }
+  if(scene==='how'){ show('how'); return; }
+  if(scene==='play' || scene==='big' || scene==='slam'){
+    startGame();
+    if(n>1){ S.stageIdx=clamp(n-1,0,STAGES.length-1); setupStage(); }
+    // advance crowd to mid-stage by running events up to a point
+    const st=curStage();
+    if(scene==='big'){ // grow crowd by running the best gate of the early events
+      S.crowd=startCrowd(st);
+      for(let i=0;i<st.ev.length;i++){ if(st.ev[i].at < st.len*0.7){ if(st.ev[i].t==='G'){ const o=st.ev[i].g.reduce((a,b)=>_gv(b)>_gv(a)?b:a); applyGateOp(o);} S.evDone[i]=true; } }
+      S.dist = st.len*0.72; S.cx=0; S.targetX=0; spawnVisualsAhead(); S.streak=4; S.score=18650;
+    } else if(scene==='slam'){
+      S.crowd=Math.max(stageTarget(st)+50, startCrowd(st)); S.dist=st.len-3; S.cx=0; S.targetX=0; S.evDone=st.ev.map(()=>true); spawnVisualsAhead();
+    } else { // play
+      S.dist=Math.min(40, st.len*0.3); spawnVisualsAhead();
+    }
+    updateHUD(); updateTargetHUD(); snapCamera();
+    $('#banner').classList.remove('show'); $('#hint').classList.remove('on');
+    S.mode='frozen';   // static for screenshot: loop keeps rendering but does not advance the run
+    return;
+  }
+  if(scene==='pause'){ startGame(); S.dist=Math.min(40,curStage().len*0.3); spawnVisualsAhead(); updateHUD(); updateTargetHUD(); snapCamera(); pauseGame(); return; }
+  if(scene==='clear'){ startGame(); S.stageIdx=clamp(n-1,0,STAGES.length-1); setupStage(); S.crowd=stageTarget(curStage())+800; S.dist=curStage().len*0.5; S.streak=3; S.score=9200;
+    spawnVisualsAhead(); updateHUD(); updateTargetHUD(); snapCamera();
+    const b=$('#banner'); $('#bTitle').textContent='STAGE CLEAR'; $('#bSub').textContent='+12,400  🔥×1.6';
+    b.classList.add('show'); b.style.animation='none'; b.style.opacity='1'; b.style.transform='translateY(0)'; $('#hint').classList.remove('on'); S.mode='frozen'; return; }
+  if(scene==='win'){ startGame(); S.stageIdx=STAGES.length-1; S.score=8240000; S.bestCrowd=1680000; gameOver(true); return; }
+  if(scene==='lose'){ startGame(); S.stageIdx=2; S.score=4200; S.bestCrowd=1234; gameOver(false); return; }
+}
+
+/* dev helpers (inert unless called) */
+window._S=S; window._sim=_simAll; window._stage=(n)=>{ startGame(); S.stageIdx=clamp(n-1,0,STAGES.length-1); setupStage(); };
+window._setCrowd=(n)=>{ S.crowd=n; updateHUD(); }; window._win=()=>victory(true); window._lose=()=>fail(true,true);
+
+/* ---------- BOOT ---------- */
+boot();
+$('#muteBtn').textContent=Audio.muted?'🔇':'🔊';
+applyShot();
+</script>
+</body>
+</html>

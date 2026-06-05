@@ -1,0 +1,14 @@
+# temp / QA scratch (never commit)
+_raw/
+_prof/
+_check.mjs
+_simdom.html
+_dbg.html
+_st.html
+*.output
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+node_modules/
