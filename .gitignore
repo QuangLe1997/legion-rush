@@ -2,9 +2,8 @@
 _raw/
 _prof/
 _check.mjs
-_simdom.html
-_dbg.html
-_st.html
+_*.html
+_seed.png
 *.output
 
 # OS / editor
