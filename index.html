@@ -185,10 +185,10 @@ h1{ font-family:var(--disp); font-weight:900; text-transform:uppercase; letter-s
       <h1 style="font-size:30px">How to play</h1>
       <div class="how">
         <p>🏃 Your legion <b>auto-runs forward</b>. <b>Drag left/right</b> (or ◀ ▶ / A-D) to steer the whole crowd.</p>
-        <p>✳️ Run through <b>gates</b>: <b style="color:#7CFFA0">×2 / +30</b> grow your legion, <b style="color:#ff5a6a">−15</b> shrink it. Always grab the better gate.</p>
-        <p>☣️ Dodge spinning <b>hazards</b> — they cull a slice of your crowd.</p>
-        <p>💥 At each stage end, <b>CHARGE</b> the barrier. Crowd ≥ target = smash through &amp; score big. Below target = wiped.</p>
-        <p>🔥 Clear a stage with <b>zero losses</b> to build a streak score multiplier. 8 stages. Lose if your legion hits 0.</p>
+        <p>✳️ Hit <b>gates</b>: <b style="color:#7CFFA0">×2 / +30</b> grow your legion · <b style="color:#ff9a3d">÷2</b> / <b style="color:#ff5a6a">−15</b> shrink it. Always take the bigger number.</p>
+        <p>☣️ Dodge the spinning <b>sawblades</b> — they cull a slice of your crowd (some swing side to side!).</p>
+        <p>💥 At each stretch's end, <b>CHARGE</b> the barrier — beat its number to <b>SMASH</b> through and roll straight on. Fall short and you're wiped.</p>
+        <p>♾️ It never ends: the track <b>speeds up every stretch</b> and the scenery shifts. Keep a flawless <b>🔥 streak</b> for a score multiplier. How far can you get?</p>
       </div>
       <button class="btn" id="howOk">Got it</button>
     </div>
@@ -234,7 +234,7 @@ h1{ font-family:var(--disp); font-weight:900; text-transform:uppercase; letter-s
    ============================================================ */
 
 /* ---------- CDN-fail guard: load Three.js, else show Reload ---------- */
-let THREE, USE_BLOOM = true, EffectComposer, RenderPass, UnrealBloomPass, OutputPass;
+let THREE, USE_BLOOM = true, EffectComposer, RenderPass, UnrealBloomPass, OutputPass, mergeGeometries=null;
 try {
   THREE = await import('three');
   try {
@@ -243,6 +243,8 @@ try {
     ({ UnrealBloomPass }= await import('three/addons/postprocessing/UnrealBloomPass.js'));
     ({ OutputPass }     = await import('three/addons/postprocessing/OutputPass.js'));
   } catch(e){ USE_BLOOM = false; console.warn('bloom addons unavailable, running without bloom', e); }
+  try { ({ mergeGeometries } = await import('three/addons/utils/BufferGeometryUtils.js')); }
+  catch(e){ console.warn('BufferGeometryUtils unavailable; using capsule soldiers', e); }
 } catch (err) {
   document.body.innerHTML =
     '<div style="display:grid;place-items:center;height:100dvh;font-family:system-ui;color:#eef0ff;text-align:center;padding:24px">'
@@ -265,28 +267,30 @@ const lerp = (a,b,t)=> a+(b-a)*t;
    §14 CONFIG — single source of truth for balance numbers.
    ============================================================ */
 const CONFIG = {
-  RENDER_CAP: 700,              // max instanced runners drawn (logic count can exceed)
-  MAX_LOGIC: 99999999,
-  START_MULT:  { easy:1.50, normal:1.0, hard:0.75 }, // scales each stage's start crowd
-  RUN_SPEED:   { easy:15, normal:18, hard:21 },     // world units / sec
-  CHARGE_MULT: 2.3,             // speed-up during the final charge
+  RENDER_CAP: 100,              // representative soldiers drawn; true count shown on HUD ("+N")
+  MAX_LOGIC: 1e15,
+  BASE_START:  { easy:40, normal:26, hard:16 },     // crowd at the very first stage (then carries over)
+  RUN_SPEED:   { easy:14, normal:17, hard:20 },     // base world units / sec
+  SPEED_RAMP:  0.05,            // speed ×= (1 + stageIdx·SPEED_RAMP) — gets faster every stage
+  SPEED_CAP:   2.7,            // max speed multiplier
+  CHARGE_MULT: 2.0,             // speed-up during the final charge
   TRACK_HALF: 6.0,              // half track width; steer clamp = TRACK_HALF - STEER_MARGIN
   STEER_MARGIN: 0.5,
-  STEER_SENS: 1.7,              // drag sensitivity (canvas-widths -> track-widths)
+  STEER_SENS: 1.8,              // drag sensitivity (canvas-widths -> track-widths)
   STEER_LERP: 9,                // how fast centroid chases target
   KEY_SPEED: 11,                // desktop arrow steer speed (units/sec)
-  SPACING: 0.62,                // phyllotaxis packing -> crowd density
-  RUNNER_R: 0.30,
-  BOB_RATE: 9.0,                // run-cycle bob frequency
+  SPACING: 0.60,                // phyllotaxis packing -> crowd density
+  RUNNER_R: 0.30, BOB_RATE: 9.0,
+  EV_SCALE: 1.4,                // widen spacing between gate rows + stage length (less cramped)
   // difficulty global modifiers
-  HAZARD_MULT: { easy:0.70, normal:1.0, hard:1.15 },  // scales hazard cull fraction
-  TARGET_MULT: { easy:0.60, normal:1.0, hard:1.12 },  // scales every stage target
+  HAZARD_MULT: { easy:0.72, normal:1.0, hard:1.15 },  // scales hazard cull fraction
+  TOLL_FRAC:   { easy:0.30, normal:0.42, hard:0.55 }, // barrier toll = greedyEnd × TOLL_FRAC (carryover clash cost)
   // streak + scoring (DOCS §7)
-  STREAK_STEP: 0.20,            // mult = 1 + min(streak,STREAK_MAX)*STREAK_STEP
+  STREAK_STEP: 0.20,            // mult = 1 + min(streak,STREAK_MAX)·STREAK_STEP
   STREAK_MAX: 10,
-  SCORE_SLAM: 4,               // points per runner present at the slam
-  SCORE_CLEAR: 250,            // flat per stage cleared
-  SCORE_SURPLUS: 2,            // points per surplus runner (crowd - target)
+  SCORE_SLAM: 3,               // points per runner present at the slam
+  SCORE_CLEAR: 200,            // flat per stage cleared
+  SCORE_TOLL: 2,               // points per toll runner smashed
 };
 
 /* ============================================================
@@ -324,10 +328,10 @@ const STAGES = [
   { name:'MAGMA RUN', hue:18, len:160, start:42, target:2300, ev:[
     {at:22, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
     {at:42, t:'G', g:[{side:-1,op:'add',v:80},{side:1,op:'mul',v:3}]},
-    {at:60, t:'H', kind:'spin', x:-2.0, w:3.6, cull:0.42},
-    {at:80, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:3},{side:1,op:'sub',v:300}]},
-    {at:100,t:'H', kind:'saw', x:2.4, w:3.4, cull:0.40},
-    {at:120,t:'G', g:[{side:-1,op:'sub',v:500},{side:1,op:'mul',v:2}]},
+    {at:60, t:'H', kind:'spin', x:-2.0, w:3.6, cull:0.42, osc:1.6, phase:0.4},
+    {at:80, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:3},{side:1,op:'div',v:3}]},
+    {at:100,t:'H', kind:'saw', x:2.4, w:3.4, cull:0.40, osc:1.8, phase:1.1},
+    {at:120,t:'G', g:[{side:-1,op:'div',v:2},{side:1,op:'mul',v:2}]},
     {at:142,t:'G', g:[{side:-1,op:'mul',v:2},{side:1,op:'add',v:200}]},
   ]},
   { name:'CRYO VAULT', hue:165, len:165, start:55, target:2800, ev:[
@@ -342,31 +346,31 @@ const STAGES = [
   { name:'ECHO REACTOR', hue:120, len:175, start:70, target:11500, ev:[
     {at:20, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
     {at:40, t:'G', g:[{side:-1,op:'add',v:300},{side:1,op:'mul',v:3}]},
-    {at:58, t:'H', kind:'saw', x:1.8, w:3.6, cull:0.48},
-    {at:78, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'sub',v:3000}]},
-    {at:98, t:'H', kind:'spin', x:-2.2, w:3.8, cull:0.46},
-    {at:120,t:'G', g:[{side:-1,op:'sub',v:8000},{side:1,op:'mul',v:3}]},
+    {at:58, t:'H', kind:'saw', x:1.8, w:3.6, cull:0.48, osc:1.8, phase:0.7},
+    {at:78, t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'div',v:3}]},
+    {at:98, t:'H', kind:'spin', x:-2.2, w:3.8, cull:0.46, osc:1.6, phase:2.0},
+    {at:120,t:'G', g:[{side:-1,op:'div',v:3},{side:1,op:'mul',v:3}]},
     {at:142,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:2000}]},
-    {at:160,t:'H', kind:'wall', x:0, w:3.0, cull:0.40},
+    {at:160,t:'H', kind:'wall', x:0, w:3.0, cull:0.40, osc:1.5, phase:1.0},
   ]},
   { name:'STORM SPIRE', hue:50, len:185, start:90, target:80000, ev:[
     {at:20, t:'G', g:[{side:-1,op:'mul',v:4},{side:1,op:'mul',v:3}]},
-    {at:40, t:'H', kind:'spin', x:-2.0, w:3.8, cull:0.50},
+    {at:40, t:'H', kind:'spin', x:-2.0, w:3.8, cull:0.50, osc:2.0, phase:0.3},
     {at:60, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:4000}]},
-    {at:80, t:'G', g:[{side:-1,op:'sub',v:20000},{side:1,op:'mul',v:3}]},
-    {at:100,t:'H', kind:'saw', x:2.2, w:3.8, cull:0.50},
-    {at:120,t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'sub',v:30000}]},
-    {at:142,t:'H', kind:'wall', x:-2.2, w:3.4, cull:0.45},
+    {at:80, t:'G', g:[{side:-1,op:'div',v:2},{side:1,op:'mul',v:3}]},
+    {at:100,t:'H', kind:'saw', x:2.2, w:3.8, cull:0.50, osc:2.0, phase:1.6},
+    {at:120,t:'G', g:[{side:-1,op:'mul',v:2},{side:0,op:'mul',v:4},{side:1,op:'div',v:4}]},
+    {at:142,t:'H', kind:'wall', x:-2.2, w:3.4, cull:0.45, osc:1.6, phase:0.9},
     {at:166,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:2}]},
   ]},
   { name:'OVERLORD GATE', hue:300, len:200, start:120, target:700000, ev:[
     {at:20, t:'G', g:[{side:-1,op:'mul',v:4},{side:1,op:'mul',v:3}]},
     {at:40, t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'add',v:10000}]},
-    {at:58, t:'H', kind:'saw', x:-2.0, w:4.0, cull:0.52},
-    {at:78, t:'G', g:[{side:-1,op:'sub',v:60000},{side:1,op:'mul',v:4}]},
-    {at:98, t:'H', kind:'spin', x:2.0, w:4.0, cull:0.52},
-    {at:118,t:'G', g:[{side:-1,op:'mul',v:3},{side:0,op:'mul',v:5},{side:1,op:'sub',v:100000}]},
-    {at:140,t:'H', kind:'wall', x:0, w:3.2, cull:0.48},
+    {at:58, t:'H', kind:'saw', x:-2.0, w:4.0, cull:0.52, osc:2.0, phase:0.5},
+    {at:78, t:'G', g:[{side:-1,op:'div',v:3},{side:1,op:'mul',v:4}]},
+    {at:98, t:'H', kind:'spin', x:2.0, w:4.0, cull:0.52, osc:2.2, phase:1.3},
+    {at:118,t:'G', g:[{side:-1,op:'mul',v:3},{side:0,op:'mul',v:5},{side:1,op:'div',v:4}]},
+    {at:140,t:'H', kind:'wall', x:0, w:3.2, cull:0.48, osc:1.8, phase:2.1},
     {at:162,t:'G', g:[{side:-1,op:'mul',v:3},{side:1,op:'mul',v:4}]},
     {at:182,t:'G', g:[{side:-1,op:'add',v:40000},{side:1,op:'mul',v:2}]},
   ]},
@@ -447,9 +451,9 @@ function hideAll(){ Scenes.forEach(s=>$('#'+s).classList.add('hidden')); $('#app
    ============================================================ */
 const S = {
   mode:'menu', diff:'normal',
-  crowd:18, score:0, streak:0, stageIdx:0, stageClean:true,
-  dist:0, cx:0, targetX:0, keyDir:0,
-  speed:18, charging:false, slammed:false,
+  crowd:26, score:0, streak:0, stageIdx:0, stageClean:true,
+  dist:0, stageStart:0, toll:0, cx:0, targetX:0, keyDir:0,
+  speed:17, charging:false, slammed:false,
   best:0, bestCrowd:0, bestStage:1,
   evDone:[], shake:0, t:0,
   _simAtBarrier:0, _simCleared:false,
@@ -473,21 +477,48 @@ const active = { gates:[], hazards:[], pickups:[] };
 const pickupPool=[];
 let particles=null, pPos, pVel, pLife, pCol, P_MAX=900, pCount=0;
 const labelCache = new Map();
+const biomeTarget = { fog:new THREE.Color(0x07060f), rail:new THREE.Color(0xff3344), sun:new THREE.Color(0xff5a8a) };
+
+/* Build one merged low-poly SOLDIER (helmet, head, torso, arms, legs, boots, rifle).
+   Uniform parts are white (tinted per-instance by instanceColor); helmet/rifle/boots stay dark.
+   Origin at the feet (y=0). One geometry → still a single InstancedMesh draw call. */
+function buildSoldierGeometry(){
+  const parts=[], UNI=[1,1,1], DARK=[0.13,0.14,0.18], GUN=[0.24,0.25,0.30], SKIN=[0.62,0.43,0.34];
+  function add(geo,col,x,y,z,rx,ry,rz){
+    if(rx) geo.rotateX(rx); if(ry) geo.rotateY(ry); if(rz) geo.rotateZ(rz); geo.translate(x,y,z);
+    const n=geo.attributes.position.count, c=new Float32Array(n*3);
+    for(let i=0;i<n;i++){ c[i*3]=col[0]; c[i*3+1]=col[1]; c[i*3+2]=col[2]; }
+    geo.setAttribute('color', new THREE.BufferAttribute(c,3)); parts.push(geo);
+  }
+  add(new THREE.BoxGeometry(0.17,0.5,0.17), UNI, -0.12,0.27,0);            // legs
+  add(new THREE.BoxGeometry(0.17,0.5,0.17), UNI,  0.12,0.27,0);
+  add(new THREE.BoxGeometry(0.2,0.12,0.34), DARK,-0.12,0.06,0.07);         // boots
+  add(new THREE.BoxGeometry(0.2,0.12,0.34), DARK, 0.12,0.06,0.07);
+  add(new THREE.BoxGeometry(0.46,0.54,0.3), UNI,  0,0.79,0);              // torso
+  add(new THREE.BoxGeometry(0.13,0.46,0.15),UNI, -0.31,0.76,0);           // arms
+  add(new THREE.BoxGeometry(0.13,0.46,0.15),UNI,  0.31,0.76,0);
+  add(new THREE.SphereGeometry(0.16,8,6), SKIN, 0,1.16,0);               // head
+  const helm=new THREE.SphereGeometry(0.2,12,7,0,Math.PI*2,0,Math.PI*0.62); helm.scale(1,0.95,1);
+  add(helm, GUN, 0,1.2,0);                                               // helmet dome
+  add(new THREE.BoxGeometry(0.07,0.07,0.7), GUN, 0.17,0.72,0.18, 0.55,0,0.22); // rifle (angled)
+  const g = mergeGeometries(parts, false);
+  parts.forEach(p=>p.dispose&&p.dispose());
+  return g;
+}
 
 function makeLabelTexture(text, rgb){
   const key=text+'|'+rgb; if(labelCache.has(key)) return labelCache.get(key);
-  const c=document.createElement('canvas'); c.width=256; c.height=128; const x=c.getContext('2d');
-  x.clearRect(0,0,256,128);
-  x.font='900 84px Orbitron, system-ui, sans-serif'; x.textAlign='center'; x.textBaseline='middle';
-  x.shadowColor=rgb; x.shadowBlur=20; x.fillStyle='#fff'; x.fillText(text,128,66);
-  x.shadowBlur=0; x.lineWidth=3; x.strokeStyle=rgb; x.strokeText(text,128,66);
-  const t=new THREE.CanvasTexture(c); t.anisotropy=2; labelCache.set(key,t); return t;
+  const c=document.createElement('canvas'); c.width=320; c.height=170; const x=c.getContext('2d');
+  x.clearRect(0,0,320,170);
+  x.font='900 120px Orbitron, system-ui, sans-serif'; x.textAlign='center'; x.textBaseline='middle';
+  x.shadowColor=rgb; x.shadowBlur=26; x.fillStyle='#fff'; x.fillText(text,160,92);
+  x.shadowBlur=0; x.lineWidth=4; x.strokeStyle=rgb; x.strokeText(text,160,92);
+  const t=new THREE.CanvasTexture(c); t.anisotropy=4; labelCache.set(key,t); return t;
 }
-function fmt(n){ n=Math.floor(n);
-  if(n<10000) return ''+n;
-  if(n<1e6) return (n/1e3).toFixed(n<1e5?1:0)+'K';
-  if(n<1e9) return (n/1e6).toFixed(2)+'M';
-  return (n/1e9).toFixed(2)+'B';
+function fmt(n){ n=Math.floor(n); if(n<10000) return ''+n;
+  const u=['','K','M','B','T','Qa','Qi','Sx','Sp']; let i=0,v=n;
+  while(v>=1000 && i<u.length-1){ v/=1000; i++; }
+  return (v<10?v.toFixed(2):v<100?v.toFixed(1):Math.round(v))+u[i];
 }
 
 function boot(){
@@ -514,26 +545,25 @@ function boot(){
   }
 
   // synthwave sun on the horizon
-  sunMat = new THREE.MeshBasicMaterial({ color:0xff5a8a, transparent:true, opacity:.9, fog:false });
+  sunMat = new THREE.MeshBasicMaterial({ color:0xff5a8a, transparent:true, opacity:.78, fog:false });
   sun = new THREE.Mesh(new THREE.CircleGeometry(26, 48), sunMat);
   sun.position.set(0, 6, 320); scene.add(sun);
-  const halo = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color:0x3a1850, transparent:true, opacity:.5, fog:false }));
+  const halo = new THREE.Mesh(new THREE.CircleGeometry(40, 48), new THREE.MeshBasicMaterial({ color:0x3a1850, transparent:true, opacity:.4, fog:false }));
   halo.position.set(0,6,330); scene.add(halo); sun.userData.halo=halo;
 
-  // crowd InstancedMesh (one draw call)
-  const rg = new THREE.CapsuleGeometry(CONFIG.RUNNER_R, 0.52, 3, 6);
-  const rm = new THREE.MeshStandardMaterial({ color:0xffffff, roughness:.45, metalness:.15,
-    emissive:new THREE.Color(0xff3344), emissiveIntensity:.55 });
+  // crowd InstancedMesh (one draw call) — neon army-men
+  const rg = (mergeGeometries ? buildSoldierGeometry() : new THREE.CapsuleGeometry(0.3,0.6,3,6));
+  const hasVC = !!rg.getAttribute('color');
+  const rm = new THREE.MeshStandardMaterial({ color:0xffffff, vertexColors:hasVC, roughness:.62, metalness:.16,
+    emissive:new THREE.Color(0xff3344), emissiveIntensity:.14 });
   crowdMesh = new THREE.InstancedMesh(rg, rm, CONFIG.RENDER_CAP);
   crowdMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
   crowdMesh.frustumCulled = false;
-  crowdColors = new Float32Array(CONFIG.RENDER_CAP*3);
-  const base=new THREE.Color(0xff3344), alt=new THREE.Color(0xffd24a), c=new THREE.Color();
+  const base=new THREE.Color(0xff3344), alt=new THREE.Color(0xffb24a), c=new THREE.Color();
   for(let i=0;i<CONFIG.RENDER_CAP;i++){
-    c.copy(base).lerp(alt, Math.random()<0.18?Math.random()*0.7:0).offsetHSL(0,0,(Math.random()-0.5)*0.12);
-    c.toArray(crowdColors, i*3); crowdMesh.setColorAt(i, c);
-    // phyllotaxis formation offset
-    const r=CONFIG.SPACING*Math.sqrt(i+0.6), a=i*2.39996323;
+    c.copy(base).lerp(alt, Math.random()<0.22?(0.3+Math.random()*0.6):0).offsetHSL(0,0,(Math.random()-0.5)*0.10);
+    crowdMesh.setColorAt(i, c);                       // per-soldier uniform tint (multiplies vertex colors)
+    const r=CONFIG.SPACING*Math.sqrt(i+0.6), a=i*2.39996323;   // phyllotaxis packing
     formation.push({x:Math.cos(a)*r, z:Math.sin(a)*r});
     runnerPhase.push(Math.random()*Math.PI*2);
   }
@@ -557,7 +587,7 @@ function boot(){
   if(USE_BLOOM){
     composer=new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene,camera));
-    bloomPass=new UnrealBloomPass(new THREE.Vector2(W,H), 0.62, 0.7, 0.82);
+    bloomPass=new UnrealBloomPass(new THREE.Vector2(W,H), 0.55, 0.7, 0.82);
     composer.addPass(bloomPass);
     composer.addPass(new OutputPass());
   }
@@ -576,15 +606,16 @@ function makeGridTexture(){
 }
 function makeGate(){
   const g=new THREE.Group();
-  const panel=new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.TRACK_HALF, 4.4),
-    new THREE.MeshBasicMaterial({ color:0x44ff88, transparent:true, opacity:.28, side:THREE.DoubleSide, depthWrite:false }));
-  panel.position.y=2.2;
-  const frameMat=new THREE.MeshStandardMaterial({ color:0x222, emissive:new THREE.Color(0x44ff88), emissiveIntensity:1.6 });
-  const top=new THREE.Mesh(new THREE.BoxGeometry(CONFIG.TRACK_HALF,0.16,0.16), frameMat); top.position.y=4.4;
-  const post=new THREE.Mesh(new THREE.BoxGeometry(0.16,4.4,0.16), frameMat);
-  const label=new THREE.Mesh(new THREE.PlaneGeometry(2.6,1.3), new THREE.MeshBasicMaterial({ transparent:true, depthWrite:false }));
-  label.position.set(0,2.4,-0.06); label.rotation.y=Math.PI;   // face the trailing camera (-Z), text not mirrored
-  g.add(panel,top,post,label); g.userData={panel,top,post,label,frameMat};
+  const panel=new THREE.Mesh(new THREE.PlaneGeometry(CONFIG.TRACK_HALF, 4.6),
+    new THREE.MeshBasicMaterial({ color:0x44ff88, transparent:true, opacity:.2, side:THREE.DoubleSide, depthWrite:false }));
+  panel.position.y=2.3;
+  const frameMat=new THREE.MeshStandardMaterial({ color:0x222, emissive:new THREE.Color(0x44ff88), emissiveIntensity:1.9 });
+  const top=new THREE.Mesh(new THREE.BoxGeometry(CONFIG.TRACK_HALF,0.18,0.18), frameMat); top.position.y=4.6;
+  const postL=new THREE.Mesh(new THREE.BoxGeometry(0.18,4.6,0.18), frameMat); postL.position.set(-CONFIG.TRACK_HALF/2,2.3,0);
+  const postR=new THREE.Mesh(new THREE.BoxGeometry(0.18,4.6,0.18), frameMat); postR.position.set(CONFIG.TRACK_HALF/2,2.3,0);
+  const label=new THREE.Mesh(new THREE.PlaneGeometry(3.2,1.6), new THREE.MeshBasicMaterial({ transparent:true, depthWrite:false }));
+  label.position.set(0,2.5,-0.06); label.rotation.y=Math.PI;   // face the trailing camera (-Z), text not mirrored
+  g.add(panel,top,postL,postR,label); g.userData={panel,top,postL,postR,label,frameMat};
   g.visible=false; scene.add(g); return g;
 }
 function makePickup(){
@@ -593,12 +624,14 @@ function makePickup(){
   const label=new THREE.Mesh(new THREE.PlaneGeometry(2.2,1.1), new THREE.MeshBasicMaterial({transparent:true,depthWrite:false}));
   label.position.set(0,1.7,-0.05); label.rotation.y=Math.PI; const g=new THREE.Group(); g.add(m,label); g.userData={core:m,label}; g.visible=false; scene.add(g); return g;
 }
-function makeHazard(){
+function makeHazard(){       // a menacing neon sawblade: crossed blades + warning ring + hub
   const g=new THREE.Group();
-  const mat=new THREE.MeshStandardMaterial({ color:0x180406, emissive:new THREE.Color(0xff3322), emissiveIntensity:1.5, roughness:.4, metalness:.3 });
-  const bar=new THREE.Mesh(new THREE.BoxGeometry(3.0,0.5,0.5), mat);
-  const bar2=bar.clone();
-  g.add(bar,bar2); g.userData={mat,bar,bar2}; g.visible=false; scene.add(g); return g;
+  const mat=new THREE.MeshStandardMaterial({ color:0x2a0608, emissive:new THREE.Color(0xff2a2a), emissiveIntensity:1.8, roughness:.35, metalness:.4 });
+  const bar=new THREE.Mesh(new THREE.BoxGeometry(3,0.42,0.42), mat);
+  const bar2=new THREE.Mesh(new THREE.BoxGeometry(3,0.42,0.42), mat); bar2.rotation.z=Math.PI/2;
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.5,0.16,8,28), mat);
+  const hub=new THREE.Mesh(new THREE.CylinderGeometry(0.32,0.32,0.6,14), mat); hub.rotation.x=Math.PI/2;
+  g.add(bar,bar2,ring,hub); g.userData={mat,bar,bar2,ring}; g.visible=false; scene.add(g); return g;
 }
 function makeBarrier(){
   const g=new THREE.Group();
@@ -641,38 +674,70 @@ function updateParticles(dt){
 /* ============================================================
    STAGE SETUP & EVENT SPAWNING
    ============================================================ */
-const GREEN=0x44ff88, BLUE=0x59b8ff, RED=0xff4455, GOLD=0xffd24a;
-function curStage(){ return STAGES[S.stageIdx]; }
-function stageTarget(st){ return Math.round(st.target*CONFIG.TARGET_MULT[S.diff]); }
-function startCrowd(st){ return Math.max(4, Math.round(st.start*CONFIG.START_MULT[S.diff])); }
+const GREEN=0x44ff88, BLUE=0x59b8ff, RED=0xff4455, ORANGE=0xff9a3d, GOLD=0xffd24a;
+const genCache=[];
+function opResult(c,o){ return o.op==='mul'?c*o.v : o.op==='add'?c+o.v : o.op==='div'?Math.floor(c/o.v) : c-o.v; }
+/* Endless procedural sectors after the 8 authored stages — scale up, with ÷ traps,
+   oscillating hazards and bonus pickups for variety. Deterministic per index. */
+function genStage(i){
+  if(genCache[i]) return genCache[i];
+  const R=(seed)=>{ const x=Math.sin(i*97.13+seed*13.37)*43758.5453; return x-Math.floor(x); };
+  const hue=(i*53+150)%360, rows=4+(i%3); const ev=[]; let at=26; const maxMul=2+Math.min(3,Math.floor(i/5)); let s=0;
+  for(let r=0;r<rows;r++){
+    const mul=2+Math.floor(R(s++)*maxMul);
+    const tr=R(s++); const other = tr<0.5 ? {op:'div',v:2+Math.floor(R(s++)*2)}
+                        : tr<0.78 ? {op:'add',v:Math.round(20*(i+2))} : {op:'mul',v:1};
+    const goodLeft=R(s++)<0.5;
+    ev.push({at, t:'G', g:[ goodLeft?{side:-1,op:'mul',v:mul}:{side:-1,...other},
+                            goodLeft?{side:1,...other}:{side:1,op:'mul',v:mul} ]});
+    at += 28+Math.floor(R(s++)*10);
+    if(r<rows-1 && R(s++)<0.65){
+      const kinds=['saw','spin','wall'];
+      ev.push({at,t:'H',kind:kinds[Math.floor(R(s++)*3)], x:(R(s++)<0.5?-1:1)*(1.6+R(s++)*1.2),
+               w:3.0+R(s++)*1.0, cull:0.30+Math.min(0.22,i*0.012), osc:R(s++)<0.5?1.3+R(s++)*1.3:0, phase:R(s++)*6.28});
+      at += 26+Math.floor(R(s++)*8);
+    }
+    if(R(s++)<0.3){ ev.push({at,t:'P',x:(R(s++)*2-1)*3,v:Math.round(30*(i+1))}); at+=22; }
+  }
+  const st={ name:'SECTOR '+(i+1), hue, len:Math.max(150,at+26), ev }; genCache[i]=st; return st;
+}
+function curStage(){ return S.stageIdx<STAGES.length ? STAGES[S.stageIdx] : genStage(S.stageIdx); }
+function stageLenW(st){ return st.len*CONFIG.EV_SCALE; }
+function evZ(ev){ return S.stageStart + ev.at*CONFIG.EV_SCALE; }       // absolute world Z (continuous run)
+function barrierZ(){ return S.stageStart + stageLenW(curStage()); }
+function stageGreedyEnd(st, from){            // best-case growth through gates (greedy dodges hazards)
+  let c=from;
+  for(const ev of st.ev){
+    if(ev.t==='G'){ let best=c; for(const o of ev.g){ const v=opResult(c,o); if(v>best) best=v; } c=best; }
+    else if(ev.t==='P'){ c+=ev.v; }
+  }
+  return c;
+}
+function stageToll(){ const st=curStage();   // clamp to the crowd cap so a maxed legion can always still clear
+  return Math.max(8, Math.round(Math.min(stageGreedyEnd(st,S.crowd), CONFIG.MAX_LOGIC)*CONFIG.TOLL_FRAC[S.diff])); }
 
-function setupStage(){
+function setupStage(){     // does NOT reset crowd or dist — the run is continuous & the crowd carries over
   const st=curStage();
-  S.dist=0; S.cx=0; S.targetX=0; S.charging=false; S.slammed=false;
-  S.crowd = startCrowd(st);                       // fresh per-stage start (no carryover)
-  if(S.crowd>S.bestCrowd) S.bestCrowd=S.crowd;
+  S.charging=false; S.slammed=false;
   S.evDone = st.ev.map(()=>false);
-  st.ev.forEach(e=>{ e._spawned=false; });         // re-arm visuals for this stage
-  // reset active visuals to pool
+  st.ev.forEach(e=>{ e._spawned=false; });
   active.gates.length=0; active.hazards.length=0; active.pickups.length=0;
   gatePool.forEach(g=>g.visible=false); hazPool.forEach(h=>h.visible=false); pickupPool.forEach(p=>p.visible=false);
-  barrier.visible=false;
-  // biome color
-  const hue=st.hue, col=new THREE.Color().setHSL(hue/360,0.8,0.6);
-  scene.fog.color.setHSL(hue/360,0.5,0.04); renderer.setClearColor(scene.fog.color,1);
-  rail.forEach(r=>r.material.emissive.copy(col));
-  groundMat.map && groundMat.map.dispose && 0;
-  sunMat.color.setHSL(((hue+20)%360)/360,0.85,0.62);
-  // place barrier at stage end
-  barrier.position.set(0,0, st.len);
-  barrier.userData.wall.material.emissive.copy(new THREE.Color(0xff3344));
-  barrier.userData.label.material.map = makeLabelTexture(fmt(stageTarget(st)), '#ff5a6a');
+  S.speed = CONFIG.RUN_SPEED[S.diff] * Math.min(CONFIG.SPEED_CAP, 1 + S.stageIdx*CONFIG.SPEED_RAMP);  // speed up each stage
+  S.toll = stageToll();                            // barrier toll scales to this stage's achievable growth
+  if(S.crowd>S.bestCrowd) S.bestCrowd=S.crowd;
+  const hue=st.hue;                                 // biome crossfade targets (applied gradually in render)
+  biomeTarget.fog.setHSL(hue/360,0.55,0.045);
+  biomeTarget.rail.setHSL(hue/360,0.85,0.6);
+  biomeTarget.sun.setHSL(((hue+18)%360)/360,0.85,0.62);
+  barrier.position.set(0,0, barrierZ());
+  barrier.userData.label.material.map = makeLabelTexture(fmt(S.toll), '#ff7a88');
   barrier.userData.label.material.needsUpdate=true;
   updateHUD(); updateTargetHUD();
 }
 
-function opLabel(o){ return o.op==='mul' ? '×'+o.v : o.op==='add' ? '+'+fmt(o.v) : '−'+fmt(o.v); }
-function opColor(o){ return o.op==='sub' ? RED : o.op==='mul' ? GREEN : BLUE; }
+function opLabel(o){ return o.op==='mul'?'×'+o.v : o.op==='add'?'+'+fmt(o.v) : o.op==='div'?'÷'+o.v : '−'+fmt(o.v); }
+function opColor(o){ return o.op==='sub'?RED : o.op==='div'?ORANGE : o.op==='mul'?GREEN : BLUE; }
 
 function spawnGateVisual(ev){
   const opts=ev.g;
@@ -682,28 +747,28 @@ function spawnGateVisual(ev){
     const segW = opts.length>=3 ? CONFIG.TRACK_HALF*2/3 : CONFIG.TRACK_HALF;
     const segX = o.side * (opts.length>=3 ? (CONFIG.TRACK_HALF*2/3) : (CONFIG.TRACK_HALF/2));
     const ud=g.userData; const col=opColor(o);
-    ud.panel.geometry.dispose(); ud.panel.geometry=new THREE.PlaneGeometry(segW-0.2,4.4);
+    ud.panel.geometry.dispose(); ud.panel.geometry=new THREE.PlaneGeometry(segW-0.2,4.6);
     ud.panel.material.color.setHex(col);
     ud.frameMat.emissive.setHex(col);
-    ud.top.geometry.dispose(); ud.top.geometry=new THREE.BoxGeometry(segW-0.2,0.16,0.16);
+    ud.top.geometry.dispose(); ud.top.geometry=new THREE.BoxGeometry(segW-0.2,0.18,0.18);
+    ud.postL.position.x = -(segW-0.2)/2; ud.postR.position.x = (segW-0.2)/2;
     ud.label.material.map=makeLabelTexture(opLabel(o), '#'+col.toString(16).padStart(6,'0')); ud.label.material.needsUpdate=true;
     ud.label.material.color.setHex(0xffffff);
-    g.position.set(segX, 0, ev.at);
+    g.position.set(segX, 0, evZ(ev));
     g.userData.op=o; g.userData.evRef=ev;
     active.gates.push(g);
   });
 }
 function spawnHazardVisual(ev){
   const h=hazPool.find(x=>!x.visible)||makeHazard(); h.visible=true;
-  h.userData.bar.geometry.dispose(); h.userData.bar.geometry=new THREE.BoxGeometry(ev.w,0.5,0.5);
-  h.userData.bar2.geometry.dispose(); h.userData.bar2.geometry=new THREE.BoxGeometry(ev.w,0.5,0.5);
-  h.userData.bar2.rotation.z=Math.PI/2;
-  h.position.set(ev.x,1.3,ev.at); h.userData.ev=ev; h.userData.kind=ev.kind;
+  const k=ev.w/3;
+  h.userData.bar.scale.x=k; h.userData.bar2.scale.x=k; h.userData.ring.scale.set(k,k,1);
+  h.position.set(hazardX(ev),1.4,evZ(ev)); h.userData.ev=ev; h.userData.kind=ev.kind;
   active.hazards.push(h);
 }
 function spawnPickupVisual(ev){
   const p=pickupPool.find(x=>!x.visible)||makePickup(); p.visible=true;
-  p.position.set(ev.x,1.0,ev.at);
+  p.position.set(ev.x,1.0,evZ(ev));
   p.userData.label.material.map=makeLabelTexture('+'+fmt(ev.v),'#ffd24a'); p.userData.label.material.needsUpdate=true;
   p.userData.ev=ev; active.pickups.push(p);
 }
@@ -721,6 +786,7 @@ function applyGateOp(o){
   const before=S.crowd;
   if(o.op==='mul') setCrowd(S.crowd*o.v,false);
   else if(o.op==='add') setCrowd(S.crowd+o.v,false);
+  else if(o.op==='div') setCrowd(Math.floor(S.crowd/o.v), o.v>1);
   else setCrowd(S.crowd-o.v,true);
   return S.crowd-before;
 }
@@ -734,32 +800,32 @@ function chooseGateSide(opts){
   return best;
 }
 
+function hazardX(ev){ return ev.osc ? ev.x + Math.sin(S.dist*0.16+(ev.phase||0))*ev.osc : ev.x; }
 function applyEvent(i, fx){
   const st=curStage(), ev=st.ev[i]; S.evDone[i]=true;
   if(ev.t==='G'){
     const o=chooseGateSide(ev.g);
-    const delta=applyGateOp(o);
+    const bad=(o.op==='sub'||o.op==='div');
+    applyGateOp(o);
     if(fx){
-      const col = o.op==='sub'?RED:(o.op==='mul'?GREEN:BLUE);
+      const col=opColor(o);
       const wx = o.side*(ev.g.length>=3?(CONFIG.TRACK_HALF*2/3):(CONFIG.TRACK_HALF/2));
-      burst(wx,2,S.dist+0,col, o.op==='sub'?22:30, o.op==='sub'?2:4, 4);
-      popCrowd(); flashHud(o.op);
+      burst(wx,2.4,S.dist,col, bad?22:32, bad?2:4, 4);
+      popCrowd(); flashHud(bad?'bad':o.op);
       Audio.sfx(o.op==='mul'?'mul':o.op==='add'?'add':'bad');
-      haptic(o.op==='sub'?60:16);
-      if(o.op==='sub') screenShake(0.5);
+      haptic(bad?60:16); if(bad) screenShake(0.5);
     }
     if(S.crowd<=0) return fail(fx);
   } else if(ev.t==='H'){
     const cull=ev.cull*CONFIG.HAZARD_MULT[S.diff];
-    const hit = Math.abs(S.cx - ev.x) < ev.w/2;
-    if(hit){
+    const hx=hazardX(ev);
+    if(Math.abs(S.cx - hx) < ev.w/2){
       setCrowd(S.crowd*(1-cull), true);
-      if(fx){ burst(ev.x,2,S.dist,RED,28,3.5,5); Audio.sfx('cull'); haptic(80); screenShake(0.8); flashHud('sub'); popCrowd(); }
+      if(fx){ burst(hx,2.4,S.dist,RED,28,3.5,5); Audio.sfx('cull'); haptic(90); screenShake(0.9); flashHud('bad'); popCrowd(); }
       if(S.crowd<=0) return fail(fx);
     }
   } else if(ev.t==='P'){
-    const hit=Math.abs(S.cx-ev.x)<1.5;
-    if(hit){ setCrowd(S.crowd+ev.v,false); if(fx){ burst(ev.x,2,S.dist,GOLD,24,3,4); Audio.sfx('add'); popCrowd(); haptic(12);} }
+    if(Math.abs(S.cx-ev.x)<1.6){ setCrowd(S.crowd+ev.v,false); if(fx){ burst(ev.x,2.4,S.dist,GOLD,24,3,4); Audio.sfx('add'); popCrowd(); haptic(12);} }
   }
   return true;
 }
@@ -769,34 +835,33 @@ function step(dt, fx){
   if(S.keyDir) S.targetX = clamp(S.targetX + S.keyDir*CONFIG.KEY_SPEED*dt, -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN), CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN);
   S.cx = lerp(S.cx, S.targetX, clamp(dt*CONFIG.STEER_LERP,0,1));
   // forward speed (charge near barrier)
-  const st=curStage();
-  S.charging = S.dist > st.len - 16;
+  const st=curStage(), bz=barrierZ();
+  S.charging = S.dist > bz - 16;
   const sp = S.speed * (S.charging?CONFIG.CHARGE_MULT:1);
   S.dist += sp*dt;
-  // events
-  for(let i=0;i<st.ev.length;i++){ if(!S.evDone[i] && S.dist>=st.ev[i].at){ if(!applyEvent(i,fx)) return; } }
+  // events (absolute positions; run is continuous across stages)
+  for(let i=0;i<st.ev.length;i++){ if(!S.evDone[i] && S.dist>=evZ(st.ev[i])){ if(!applyEvent(i,fx)) return; } }
   // reached barrier?
-  if(!S.slammed && S.dist>=st.len){ S.slammed=true; resolveBarrier(fx); }
+  if(!S.slammed && S.dist>=bz){ S.slammed=true; resolveBarrier(fx); }
 }
 
 function resolveBarrier(fx){
-  const st=curStage(), tgt=stageTarget(st);
-  if(SIM_MODE===2){ S._simAtBarrier=S.crowd; S._simCleared=(S.crowd>=tgt); S.mode='simdone'; return; }
-  if(S.crowd>=tgt){
-    // SMASH
-    const gain = Math.floor(S.crowd*CONFIG.SCORE_SLAM) + CONFIG.SCORE_CLEAR + Math.floor((S.crowd-tgt)*CONFIG.SCORE_SURPLUS);
+  const toll=S.toll;
+  if(SIM_MODE===2){ S._simAtBarrier=S.crowd; S._simCleared=(S.crowd>toll); S.mode='simdone'; return; }
+  if(S.crowd>toll){
+    // SMASH — clash subtracts the toll; the surviving legion runs straight on (continuous, no stop)
+    const slamCrowd=S.crowd;
     const mult = 1 + Math.min(S.streak,CONFIG.STREAK_MAX)*CONFIG.STREAK_STEP;
-    const add = Math.floor(gain*mult);
+    const add = Math.floor((slamCrowd*CONFIG.SCORE_SLAM + CONFIG.SCORE_CLEAR + toll*CONFIG.SCORE_TOLL)*mult);
     S.score += add;
     if(S.stageClean) S.streak=Math.min(S.streak+1,CONFIG.STREAK_MAX); else S.streak=0;
-    if(fx){
-      slamFX(); Audio.sfx('slam'); setTimeout(()=>Audio.sfx('clear'),250); haptic([20,40,30,60]);
-      banner(S.stageIdx>=STAGES.length-1?'VICTORY':'STAGE CLEAR', '+'+fmt(add)+(mult>1?'  🔥×'+mult.toFixed(1):''));
-    }
+    setCrowd(S.crowd - toll, false);              // attrition (clash cost) — carryover, not a streak loss
+    S.stageStart += stageLenW(curStage());        // next stretch starts at this barrier
     S.stageIdx++;
-    if(S.stageIdx>=STAGES.length){ return victory(fx); }
-    else { S.stageClean=true; if(fx) setTimeout(()=>{ if(S.mode==='playing'){ setupStage(); introBanner(); } }, 1100);
-           else setupStage(); }
+    S.stageClean=true;
+    if(fx){ slamFX(); Audio.sfx('slam'); setTimeout(()=>Audio.sfx('clear'),220); haptic([20,40,30,60]);
+      banner('SMASH!', '+'+fmt(add)+(mult>1?'  🔥×'+mult.toFixed(1):'')); }
+    setupStage();                                  // crowd carries (already reduced); seamless into next stage
   } else {
     return fail(fx, true);
   }
@@ -827,25 +892,25 @@ function startGame(){
   Audio.ensure(); resize();
   loadBests();
   Object.assign(S,{ mode:'playing', score:0, streak:0, stageIdx:0, stageClean:true,
-    speed:CONFIG.RUN_SPEED[S.diff], keyDir:0, shake:0 });
-  setupStage(); hideAll(); introBanner();   // setupStage sets the fresh per-stage crowd
+    crowd:CONFIG.BASE_START[S.diff], dist:0, stageStart:0, cx:0, targetX:0, keyDir:0, shake:0 });
+  setupStage(); hideAll(); introBanner();
   Audio.startMusic(); Audio.setIntensity(0.2);
   $('#hint').classList.add('on'); setTimeout(()=>$('#hint').classList.remove('on'), 3200);
 }
 function pauseGame(){ if(S.mode!=='playing') return; S.mode='paused'; Audio.stopMusic(); show('pause'); }
 function resumeGame(){ if(S.mode!=='paused') return; S.mode='playing'; hideAll(); last=performance.now(); Audio.startMusic(); }
-function gameOver(won){
-  S.mode = won?'won':'over';
+function gameOver(){
+  S.mode='over';
   Audio.stopMusic();
   if(S.score>S.best){ S.best=S.score; Save.set('best.'+S.diff,S.best); }
   if(S.bestCrowd>Save.get('bestCrowd.'+S.diff,0)) Save.set('bestCrowd.'+S.diff,S.bestCrowd);
-  const reached=S.stageIdx+1>STAGES.length?STAGES.length:S.stageIdx+1;
+  const reached=S.stageIdx+1;
   if(reached>Save.get('bestStage.'+S.diff,1)) Save.set('bestStage.'+S.diff,reached);
-  $('#goKick').textContent = won?'LEGION TRIUMPHANT':'Legion fallen';
+  $('#goKick').textContent = reached>8 ? 'Deep run!' : 'Legion fallen';
   $('#finalScore').textContent = fmt(S.score);
   $('#goBest').textContent = fmt(S.best);
   $('#goCrowd').textContent = fmt(S.bestCrowd);
-  $('#goStage').textContent = won? STAGES.length+'/'+STAGES.length+' ✓' : (Math.min(S.stageIdx+1,STAGES.length))+'/'+STAGES.length;
+  $('#goStage').textContent = reached;
   Save.set('plays',(Save.get('plays',0)+1));
   show('gameover');
 }
@@ -859,21 +924,21 @@ function updateHUD(){
   $('#crowd').textContent = fmt(S.crowd);
   $('#scoreChip').firstChild.textContent = fmt(S.score);
   const st=curStage();
-  $('#stageChip').firstChild.textContent = 'STAGE '+(S.stageIdx+1)+'/'+STAGES.length;
+  $('#stageChip').firstChild.textContent = 'STAGE '+(S.stageIdx+1);
   $('#stageName').textContent = st?st.name:'';
   const mult=1+Math.min(S.streak,CONFIG.STREAK_MAX)*CONFIG.STREAK_STEP;
   const sc=$('#streakChip'); if(S.streak>0){ sc.classList.add('on'); sc.textContent='🔥×'+mult.toFixed(1); } else sc.classList.remove('on');
 }
 function updateTargetHUD(){
   const st=curStage(); if(!st) return;
-  $('#tgtVal').textContent=fmt(stageTarget(st));
-  const p=clamp(S.dist/st.len,0,1)*100; $('#progFill').style.width=p+'%';
+  $('#tgtVal').textContent=fmt(S.toll);
+  const p=clamp((S.dist - S.stageStart)/stageLenW(st),0,1)*100; $('#progFill').style.width=p+'%';
   $('#distLbl').textContent = S.charging?'⚡ CHARGE':'STAGE '+(S.stageIdx+1);
 }
 let popTimer=null;
 function popCrowd(){ const el=$('#crowd'); el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop'); }
 function flashHud(op){ /* tint crowd number briefly */
-  const el=$('#crowd'); el.style.color = op==='sub'?'#ff6a7a':(op==='mul'?'#7CFFA0':'#9ad0ff');
+  const el=$('#crowd'); el.style.color = (op==='bad'||op==='sub')?'#ff6a7a':(op==='mul'?'#7CFFA0':'#9ad0ff');
   clearTimeout(popTimer); popTimer=setTimeout(()=>el.style.color='#fff',260);
 }
 function banner(t,s){ const b=$('#banner'); $('#bTitle').textContent=t; $('#bSub').textContent=s||'';
@@ -889,38 +954,36 @@ function slamFX(){ const f=$('#flash'); f.style.transition='none'; f.style.opaci
    ============================================================ */
 function updateCrowdInstances(now){
   const n=Math.min(Math.max(S.crowd,1), CONFIG.RENDER_CAP);
-  crowdMesh.count = (S.mode==='playing'||S.mode==='paused'||S.mode==='dead'||S.mode==='won')? n : (S.mode==='menu'?0:n);
+  crowdMesh.count = (S.mode==='menu')? 0 : n;     // render representatives; HUD shows the true count
   const t=now*0.001;
   for(let i=0;i<n;i++){
-    const f=formation[i];
-    const bob=Math.abs(Math.sin(t*CONFIG.BOB_RATE + runnerPhase[i]))*0.28;
-    dummy.position.set(S.cx+f.x, 0.55+bob, S.dist+f.z + (Math.sin(t*CONFIG.BOB_RATE+runnerPhase[i])*0.06));
-    dummy.rotation.set(-0.16, 0, Math.sin(t*CONFIG.BOB_RATE*0.5+runnerPhase[i])*0.06);
-    const sc=0.95+0.1*Math.sin(t*8+runnerPhase[i]);
-    dummy.scale.set(1,sc,1);
+    const f=formation[i], ph=runnerPhase[i];
+    const hop=Math.abs(Math.sin(t*CONFIG.BOB_RATE + ph))*0.16;     // soldier origin = feet (y=0)
+    dummy.position.set(S.cx+f.x, hop, S.dist+f.z + Math.sin(t*CONFIG.BOB_RATE+ph)*0.05);
+    dummy.rotation.set(-0.06, 0, Math.sin(t*CONFIG.BOB_RATE*0.5+ph)*0.05);
+    dummy.scale.setScalar(0.8);
     dummy.updateMatrix(); crowdMesh.setMatrixAt(i, dummy.matrix);
   }
   crowdMesh.instanceMatrix.needsUpdate=true;
 }
 function recycleWorld(){
   // hide gates/hazards/pickups that the crowd has fully passed
-  active.gates = active.gates.filter(g=>{ if(g.position.z < S.dist-6){ g.visible=false; return false; } return true; });
-  active.hazards = active.hazards.filter(h=>{ if(h.position.z < S.dist-6){ h.visible=false; return false; } return true; });
-  active.pickups = active.pickups.filter(p=>{ if(p.position.z < S.dist-6 || (p.userData.ev && p.userData.ev.taken)){ p.visible=false; return false; } return true; });
+  active.gates = active.gates.filter(g=>{ if(g.position.z < S.dist-8){ g.visible=false; return false; } return true; });
+  active.hazards = active.hazards.filter(h=>{ if(h.position.z < S.dist-8){ h.visible=false; return false; } return true; });
+  active.pickups = active.pickups.filter(p=>{ if(p.position.z < S.dist-8){ p.visible=false; return false; } return true; });
 }
 function spawnVisualsAhead(){
   const st=curStage(); if(!st) return;
   for(let i=0;i<st.ev.length;i++){
-    const ev=st.ev[i];
-    if(ev.at - S.dist < 60 && ev.at - S.dist > -8 && !ev._spawned){
+    const ev=st.ev[i], d=evZ(ev)-S.dist;
+    if(d<72 && d>-8 && !ev._spawned){
       ev._spawned=true;
       if(ev.t==='G') spawnGateVisual(ev);
       else if(ev.t==='H') spawnHazardVisual(ev);
       else if(ev.t==='P') spawnPickupVisual(ev);
     }
-    if(ev.at - S.dist > 70) ev._spawned=false; // allow re-arm on restart only (dist resets)
   }
-  barrier.visible = (st.len - S.dist) < 70;
+  barrier.visible = (barrierZ() - S.dist) < 82;
 }
 
 function render(now){
@@ -932,13 +995,18 @@ function render(now){
   // shake
   if(S.shake>0){ camera.position.x += (Math.random()-.5)*S.shake; camera.position.y += (Math.random()-.5)*S.shake*0.6; S.shake*=0.86; if(S.shake<0.02)S.shake=0; }
   camera.lookAt(S.cx*0.3, 1.5, S.dist+14);
+  // biome crossfade — scenery shifts smoothly between stretches
+  scene.fog.color.lerp(biomeTarget.fog,0.05); renderer.setClearColor(scene.fog.color,1);
+  rail.forEach(r=>r.material.emissive.lerp(biomeTarget.rail,0.05));
+  sunMat.color.lerp(biomeTarget.sun,0.05);
   // scroll ground + keep big props near crowd
   ground.position.z = S.dist + 240;
   if(groundMat.map) groundMat.map.offset.y = -S.dist*0.05;
   rail.forEach(r=>r.position.z=S.dist+240);
   sun.position.z = S.dist+320; sun.userData.halo.position.z=S.dist+330;
-  // spin hazards
-  active.hazards.forEach(h=>{ h.rotation.z += 0.06; if(h.userData.kind==='spin') h.rotation.y+=0.04; });
+  // spin + oscillate hazards
+  active.hazards.forEach(h=>{ const ev=h.userData.ev; h.rotation.z+=0.07; if(h.userData.kind==='spin') h.rotation.y+=0.05;
+    if(ev&&ev.osc) h.position.x = ev.x + Math.sin(S.dist*0.16+(ev.phase||0))*ev.osc; });
   active.pickups.forEach(p=>{ p.userData.core.rotation.y+=0.05; p.position.y=1.0+Math.sin(now*0.004)*0.2; });
   if(USE_BLOOM && composer) composer.render(); else renderer.render(scene,camera);
 }
@@ -997,15 +1065,16 @@ function pdown(e){ if(S.mode!=='playing') return; Audio.ensure(); dragging=true;
   dragX=e.clientX; dragStartCx=S.targetX; try{cv.setPointerCapture(e.pointerId);}catch{} }
 function pmove(e){ if(!dragging||S.mode!=='playing') return;
   const dx=e.clientX-dragX; const world=(dx/Math.max(1,W))*(CONFIG.TRACK_HALF*2)*CONFIG.STEER_SENS;
-  S.targetX=clamp(dragStartCx+world, -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN), CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN); }
+  // drag right -> crowd moves screen-right (= world -x for this trailing +Z camera)
+  S.targetX=clamp(dragStartCx - world, -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN), CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN); }
 function pup(e){ dragging=false; }
 cv.addEventListener('pointerdown', pdown);
 cv.addEventListener('pointermove', pmove);
 cv.addEventListener('pointerup', pup);
 cv.addEventListener('pointercancel', pup);
 addEventListener('keydown', e=>{
-  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') S.keyDir=-1;
-  else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') S.keyDir=1;
+  if(e.key==='ArrowLeft'||e.key==='a'||e.key==='A') S.keyDir=1;       // screen-left = world +x
+  else if(e.key==='ArrowRight'||e.key==='d'||e.key==='D') S.keyDir=-1; // screen-right = world -x
   else if(e.key==='Escape'||e.key===' '){ if(S.mode==='playing')pauseGame(); else if(S.mode==='paused')resumeGame(); }
 });
 addEventListener('keyup', e=>{ if(['ArrowLeft','ArrowRight','a','A','d','D'].includes(e.key)) S.keyDir=0; });
@@ -1032,7 +1101,7 @@ bindSwitch('#swMusic','music'); bindSwitch('#swSfx','sfx'); bindSwitch('#swHapti
    BALANCE SIM — bots play every stage via real step() logic.
    Run: ?shot=sim  (or window._sim()). SIM mode skips FX.
    ============================================================ */
-function _gv(o){ return o.op==='mul'?S.crowd*o.v : o.op==='add'?S.crowd+o.v : S.crowd-o.v; }
+function _gv(o){ return opResult(S.crowd,o); }
 function _nextEv(){ const st=curStage(); for(let i=0;i<st.ev.length;i++) if(!S.evDone[i]) return st.ev[i]; return null; }
 function _laneX(ev,o){ return ev.g.length>=3 ? o.side*(CONFIG.TRACK_HALF*2/3) : o.side*(CONFIG.TRACK_HALF/2); }
 function _botDecide(style, ev){               // teleports bot centroid for the next pending event
@@ -1044,42 +1113,34 @@ function _botDecide(style, ev){               // teleports bot centroid for the 
     if(style==='greedy'){ const safe = ev.x>0 ? -(CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN) : (CONFIG.TRACK_HALF-CONFIG.STEER_MARGIN); S.targetX=safe; S.cx=safe; }
   } else if(ev.t==='P'){ if(style==='greedy'){ S.targetX=ev.x; S.cx=ev.x; } }
 }
-function _simStage(diff, idx, style){          // isolate ONE stage, fresh start, stop at barrier
-  SIM_MODE=2; S.diff=diff;
-  Object.assign(S,{ mode:'playing', stageIdx:idx, streak:0, stageClean:true, speed:CONFIG.RUN_SPEED[diff], score:0, bestCrowd:0, _simAtBarrier:0, _simCleared:false });
-  setupStage(); const startC=S.crowd; let guard=0;
-  while(S.mode==='playing' && guard++<200000){ _botDecide(style,_nextEv()); step(TICK,false); }
-  SIM_MODE=0;
-  const reached = S.mode==='simdone';
-  return { idx:idx+1, name:STAGES[idx].name, start:startC, atBarrier:reached?S._simAtBarrier:0,
-           target:stageTarget(STAGES[idx]), cleared:reached&&S._simCleared };
-}
-function _simRun(diff, style){                  // full run; no carryover (each stage fresh)
+function _simRun(diff, style, maxStages){       // full carryover run until fail (or maxStages cap)
   SIM_MODE=1; S.diff=diff;
-  Object.assign(S,{ mode:'playing', stageIdx:0, streak:0, stageClean:true, score:0, bestCrowd:0, speed:CONFIG.RUN_SPEED[diff] });
+  Object.assign(S,{ mode:'playing', stageIdx:0, streak:0, stageClean:true, score:0, bestCrowd:0,
+    crowd:CONFIG.BASE_START[diff], dist:0, stageStart:0, cx:0, targetX:0 });
   setupStage(); let guard=0;
-  while(S.mode==='playing' && guard++<400000){ _botDecide(style,_nextEv()); step(TICK,false); }
+  while(S.mode==='playing' && S.stageIdx<maxStages && guard++<800000){ _botDecide(style,_nextEv()); step(TICK,false); }
   SIM_MODE=0;
-  return { result:S.mode, stage:Math.min(S.stageIdx+1,STAGES.length), score:S.score, crowd:S.bestCrowd };
+  return { result:S.mode, stage:(S.mode==='playing'?S.stageIdx:S.stageIdx+1), score:S.score, crowd:S.bestCrowd };
 }
 function _simAll(){
-  let out='LEGION RUSH — balance sim (real step() logic, no carryover)\n'+'='.repeat(72)+'\n';
+  let out='LEGION RUSH — endless carryover sim (real step() logic)\n'+'='.repeat(60)+'\n';
   for(const diff of ['easy','normal','hard']){
-    out+='\n['+diff.toUpperCase()+']\n';
-    out+='  st  name           start  greedy@bar  careless@bar(clr%)   target   greedy\n';
-    for(let i=0;i<STAGES.length;i++){
-      const g=_simStage(diff,i,'greedy');
-      let cs=[],cc=0; const N=16;
-      for(let k=0;k<N;k++){ const c=_simStage(diff,i,'careless'); cs.push(c.atBarrier); if(c.cleared)cc++; }
-      const cavg=Math.round(cs.reduce((a,b)=>a+b,0)/N);
-      out+='  '+String(g.idx).padEnd(3)+g.name.padEnd(15)+String(g.start).padStart(5)+'  '+fmt(g.atBarrier).padStart(9)
-         +'   '+(fmt(cavg)+'('+Math.round(cc/N*100)+'%)').padStart(15)+'   '+fmt(g.target).padStart(7)+'   '+(g.cleared?'CLEAR':'**FAIL**')+'\n';
+    out+='\n['+diff.toUpperCase()+']  base start='+CONFIG.BASE_START[diff]+'  TOLL_FRAC='+CONFIG.TOLL_FRAC[diff]+'  speed×/stage=+'+CONFIG.SPEED_RAMP+'\n';
+    SIM_MODE=1; S.diff=diff;
+    Object.assign(S,{ mode:'playing', stageIdx:0, streak:0, stageClean:true, score:0, bestCrowd:0, crowd:CONFIG.BASE_START[diff], dist:0, stageStart:0, cx:0, targetX:0 });
+    setupStage();
+    out+='  st  name           enter     toll    slam    after  (greedy carryover)\n';
+    let guard=0, enterC=S.crowd;
+    while(S.mode==='playing' && S.stageIdx<8 && guard++<300000){
+      const idx=S.stageIdx, name=curStage().name, toll=S.toll;
+      _botDecide('greedy',_nextEv()); const slam=S.crowd; step(TICK,false);
+      if(S.stageIdx>idx){ out+='  '+String(idx+1).padEnd(3)+name.padEnd(14)+fmt(enterC).padStart(7)+'  '+fmt(toll).padStart(7)+'  '+fmt(slam).padStart(7)+'  '+fmt(S.crowd).padStart(7)+'\n'; enterC=S.crowd; }
     }
-    const gr=_simRun(diff,'greedy');
-    let cr=[]; for(let k=0;k<14;k++) cr.push(_simRun(diff,'careless').stage);
-    const cavgRun=(cr.reduce((a,b)=>a+b,0)/cr.length).toFixed(1);
-    out+='  FULL greedy: reached '+gr.stage+'/8 ('+gr.result+') score='+fmt(gr.score)+' bestCrowd='+fmt(gr.crowd)+'\n';
-    out+='  FULL careless: avg '+cavgRun+'/8  ['+cr.join(',')+']\n';
+    SIM_MODE=0;
+    const g=_simRun(diff,'greedy',60);
+    out+='  FULL greedy: reached '+(g.stage>=60?'60+ (survives by growth — speed-limited in real play)':g.stage)+'  score='+fmt(g.score)+'  bestCrowd='+fmt(g.crowd)+'\n';
+    let cr=[]; for(let k=0;k<16;k++) cr.push(_simRun(diff,'careless',60).stage);
+    out+='  FULL careless: avg '+(cr.reduce((a,b)=>a+b,0)/cr.length).toFixed(1)+' stages  ['+cr.slice(0,14).join(',')+']\n';
   }
   SIM_MODE=0; S.mode='menu';
   return out;
@@ -1099,12 +1160,12 @@ function applyShot(){
     cv.dispatchEvent(new PointerEvent('pointerdown',{clientX:r.left+90,clientY:r.top+450,bubbles:true,pointerId:1}));
     cv.dispatchEvent(new PointerEvent('pointermove',{clientX:r.left+90+W*0.30,clientY:r.top+450,bubbles:true,pointerId:1}));
     cv.dispatchEvent(new PointerEvent('pointerup',{clientX:r.left+90+W*0.30,clientY:r.top+450,bubbles:true,pointerId:1}));
-    out.push('drag-right -> targetX='+S.targetX.toFixed(2)+'  '+(S.targetX>0.4?'PASS':'FAIL'));
+    out.push('drag-right -> screen-right (worldX='+S.targetX.toFixed(2)+')  '+(S.targetX<-0.4?'PASS':'FAIL'));
     S.mode='playing'; S.keyDir=0;
-    dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true}));
-    out.push('key ArrowLeft -> keyDir='+S.keyDir+'  '+(S.keyDir===-1?'PASS':'FAIL'));
-    dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowLeft',bubbles:true}));
-    const r1=_simStage('normal',0,'greedy'); out.push('stage1 greedy cleared='+r1.cleared+' @bar='+fmt(r1.atBarrier)+'  '+(r1.cleared?'PASS':'FAIL'));
+    dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
+    out.push('key ArrowRight -> screen-right (keyDir='+S.keyDir+')  '+(S.keyDir===-1?'PASS':'FAIL'));
+    dispatchEvent(new KeyboardEvent('keyup',{key:'ArrowRight',bubbles:true}));
+    const gr=_simRun('normal','greedy',6); out.push('greedy carryover reached stage '+gr.stage+'  '+(gr.stage>=6?'PASS':'FAIL'));
     out.push('console errors = '+window.__errs.length+(window.__errs.length?'  '+JSON.stringify(window.__errs.slice(0,4)):'  PASS'));
     const ok = out.every(x=>!x.includes('FAIL')) && window.__errs.length===0;
     const pre=$('#simOut'); pre.style.display='block'; pre.textContent='SELFTEST '+(ok?'OK':'CHECK')+'\n'+out.join('\n'); document.title='SELFTEST '+(ok?'OK':'CHECK'); S.mode='menu'; return;
@@ -1112,32 +1173,24 @@ function applyShot(){
   toMenu();
   if(scene==='menu'){ return; }
   if(scene==='how'){ show('how'); return; }
-  if(scene==='play' || scene==='big' || scene==='slam'){
-    startGame();
-    if(n>1){ S.stageIdx=clamp(n-1,0,STAGES.length-1); setupStage(); }
-    // advance crowd to mid-stage by running events up to a point
-    const st=curStage();
-    if(scene==='big'){ // grow crowd by running the best gate of the early events
-      S.crowd=startCrowd(st);
-      for(let i=0;i<st.ev.length;i++){ if(st.ev[i].at < st.len*0.7){ if(st.ev[i].t==='G'){ const o=st.ev[i].g.reduce((a,b)=>_gv(b)>_gv(a)?b:a); applyGateOp(o);} S.evDone[i]=true; } }
-      S.dist = st.len*0.72; S.cx=0; S.targetX=0; spawnVisualsAhead(); S.streak=4; S.score=18650;
-    } else if(scene==='slam'){
-      S.crowd=Math.max(stageTarget(st)+50, startCrowd(st)); S.dist=st.len-3; S.cx=0; S.targetX=0; S.evDone=st.ev.map(()=>true); spawnVisualsAhead();
-    } else { // play
-      S.dist=Math.min(40, st.len*0.3); spawnVisualsAhead();
-    }
+  function frozen(stage, crowd, frac, opt){ opt=opt||{};
+    startGame(); S.stageIdx=Math.max(0,stage-1); S.stageStart=0; S.dist=0; S.crowd=crowd; setupStage();
+    if(opt.toll!=null) S.toll=opt.toll;
+    if(opt.streak!=null) S.streak=opt.streak; if(opt.score!=null) S.score=opt.score;
+    if(crowd>S.bestCrowd) S.bestCrowd=crowd;
+    S.dist = stageLenW(curStage())*frac; S.cx=0; S.targetX=0; spawnVisualsAhead();
     updateHUD(); updateTargetHUD(); snapCamera();
-    $('#banner').classList.remove('show'); $('#hint').classList.remove('on');
-    S.mode='frozen';   // static for screenshot: loop keeps rendering but does not advance the run
-    return;
+    $('#banner').classList.remove('show'); $('#hint').classList.remove('on'); S.mode='frozen';
   }
-  if(scene==='pause'){ startGame(); S.dist=Math.min(40,curStage().len*0.3); spawnVisualsAhead(); updateHUD(); updateTargetHUD(); snapCamera(); pauseGame(); return; }
-  if(scene==='clear'){ startGame(); S.stageIdx=clamp(n-1,0,STAGES.length-1); setupStage(); S.crowd=stageTarget(curStage())+800; S.dist=curStage().len*0.5; S.streak=3; S.score=9200;
-    spawnVisualsAhead(); updateHUD(); updateTargetHUD(); snapCamera();
-    const b=$('#banner'); $('#bTitle').textContent='STAGE CLEAR'; $('#bSub').textContent='+12,400  🔥×1.6';
-    b.classList.add('show'); b.style.animation='none'; b.style.opacity='1'; b.style.transform='translateY(0)'; $('#hint').classList.remove('on'); S.mode='frozen'; return; }
-  if(scene==='win'){ startGame(); S.stageIdx=STAGES.length-1; S.score=8240000; S.bestCrowd=1680000; gameOver(true); return; }
-  if(scene==='lose'){ startGame(); S.stageIdx=2; S.score=4200; S.bestCrowd=1234; gameOver(false); return; }
+  if(scene==='play'){ frozen(n, n<=1?40:(n<=3?160:900), 0.22); return; }
+  if(scene==='big'){  frozen(n, 4800, 0.55, {streak:5, score:64200}); return; }
+  if(scene==='slam'){ frozen(n, 6400, 0.985, {toll:2900, streak:5, score:64200}); return; }
+  if(scene==='pause'){ startGame(); S.crowd=90; setupStage(); S.dist=stageLenW(curStage())*0.3; S.cx=0; S.targetX=0; spawnVisualsAhead(); updateHUD(); updateTargetHUD(); snapCamera(); pauseGame(); return; }
+  if(scene==='clear'){ frozen(n, 6200, 0.5, {streak:3, score:92000, toll:3400});
+    const b=$('#banner'); $('#bTitle').textContent='SMASH!'; $('#bSub').textContent='+128,400  🔥×1.6';
+    b.classList.add('show'); b.style.animation='none'; b.style.opacity='1'; b.style.transform='translateY(0)'; return; }
+  if(scene==='win'){ startGame(); S.stageIdx=22; S.score=12500000; S.bestCrowd=3400000; gameOver(); return; }
+  if(scene==='lose'){ startGame(); S.stageIdx=4; S.score=42000; S.bestCrowd=18400; gameOver(); return; }
 }
 
 /* dev helpers (inert unless called) */
